@@ -463,9 +463,9 @@ async def trade_add_coins(
         await message.answer(" Amount must be positive!")
         return
 
-    if amount > user.telecoins:
+    if amount > user.balance:
         await message.answer(
-            f" You only have {user.telecoins:,} TC!\n"
+            f" You only have {user.balance:,} TC!\n"
             f"Requested: {amount:,} TC"
         )
         return
@@ -528,7 +528,7 @@ async def execute_trade(message: Message, session: AsyncSession, trade: Trade) -
     user2 = user2_result.scalar_one()
 
     # Verify coin balances
-    if trade.user1_coins > user1.telecoins:
+    if trade.user1_coins > user1.balance:
         trade.user1_confirmed = False
         await session.commit()
         await message.answer(
@@ -536,7 +536,7 @@ async def execute_trade(message: Message, session: AsyncSession, trade: Trade) -
         )
         return
 
-    if trade.user2_coins > user2.telecoins:
+    if trade.user2_coins > user2.balance:
         trade.user2_confirmed = False
         await session.commit()
         await message.answer(
@@ -568,10 +568,10 @@ async def execute_trade(message: Message, session: AsyncSession, trade: Trade) -
             traded_pokemon.append((poke, trade.user1_id))
 
     # Transfer coins
-    user1.telecoins -= trade.user1_coins
-    user1.telecoins += trade.user2_coins
-    user2.telecoins -= trade.user2_coins
-    user2.telecoins += trade.user1_coins
+    user1.balance -= trade.user1_coins
+    user1.balance += trade.user2_coins
+    user2.balance -= trade.user2_coins
+    user2.balance += trade.user1_coins
 
     # Mark trade as completed
     trade.status = TradeStatus.COMPLETED

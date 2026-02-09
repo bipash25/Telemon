@@ -4,6 +4,7 @@ from aiogram import Dispatcher
 
 from telemon.bot.handlers import (
     admin,
+    battle,
     catch,
     help_cmd,
     market,
@@ -26,6 +27,9 @@ def register_all_handlers(dp: Dispatcher) -> None:
     # Pokemon handlers
     dp.include_router(catch.router)
     dp.include_router(pokemon.router)
+
+    # Battle handlers
+    dp.include_router(battle.router)
 
     # Economy handlers
     dp.include_router(trade.router)
