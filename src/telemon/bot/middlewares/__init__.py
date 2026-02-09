@@ -3,6 +3,7 @@
 from aiogram import Dispatcher
 
 from telemon.bot.middlewares.database import DatabaseMiddleware
+from telemon.bot.middlewares.registration import RegistrationMiddleware
 from telemon.bot.middlewares.user import UserMiddleware
 
 
@@ -15,6 +16,10 @@ def register_all_middlewares(dp: Dispatcher) -> None:
     # User loading middleware (requires database)
     dp.message.middleware(UserMiddleware())
     dp.callback_query.middleware(UserMiddleware())
+
+    # Registration check middleware (requires user)
+    dp.message.middleware(RegistrationMiddleware())
+    dp.callback_query.middleware(RegistrationMiddleware())
 
 
 __all__ = ["register_all_middlewares"]

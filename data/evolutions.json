@@ -1,0 +1,290 @@
+{
+  "1": {
+    "chain": [
+      {"species_id": 1, "evolves_to": 2, "trigger": "level", "min_level": 16},
+      {"species_id": 2, "evolves_to": 3, "trigger": "level", "min_level": 32}
+    ]
+  },
+  "2": {
+    "chain": [
+      {"species_id": 4, "evolves_to": 5, "trigger": "level", "min_level": 16},
+      {"species_id": 5, "evolves_to": 6, "trigger": "level", "min_level": 36}
+    ]
+  },
+  "3": {
+    "chain": [
+      {"species_id": 7, "evolves_to": 8, "trigger": "level", "min_level": 16},
+      {"species_id": 8, "evolves_to": 9, "trigger": "level", "min_level": 36}
+    ]
+  },
+  "4": {
+    "chain": [
+      {"species_id": 10, "evolves_to": 11, "trigger": "level", "min_level": 7},
+      {"species_id": 11, "evolves_to": 12, "trigger": "level", "min_level": 10}
+    ]
+  },
+  "5": {
+    "chain": [
+      {"species_id": 13, "evolves_to": 14, "trigger": "level", "min_level": 7},
+      {"species_id": 14, "evolves_to": 15, "trigger": "level", "min_level": 10}
+    ]
+  },
+  "6": {
+    "chain": [
+      {"species_id": 16, "evolves_to": 17, "trigger": "level", "min_level": 18},
+      {"species_id": 17, "evolves_to": 18, "trigger": "level", "min_level": 36}
+    ]
+  },
+  "7": {
+    "chain": [
+      {"species_id": 19, "evolves_to": 20, "trigger": "level", "min_level": 20}
+    ]
+  },
+  "8": {
+    "chain": [
+      {"species_id": 21, "evolves_to": 22, "trigger": "level", "min_level": 20}
+    ]
+  },
+  "9": {
+    "chain": [
+      {"species_id": 23, "evolves_to": 24, "trigger": "level", "min_level": 22}
+    ]
+  },
+  "10": {
+    "chain": [
+      {"species_id": 25, "evolves_to": 26, "trigger": "item", "item": "thunder stone"}
+    ]
+  },
+  "11": {
+    "chain": [
+      {"species_id": 27, "evolves_to": 28, "trigger": "level", "min_level": 22}
+    ]
+  },
+  "12": {
+    "chain": [
+      {"species_id": 29, "evolves_to": 30, "trigger": "level", "min_level": 16},
+      {"species_id": 30, "evolves_to": 31, "trigger": "item", "item": "moon stone"}
+    ]
+  },
+  "13": {
+    "chain": [
+      {"species_id": 32, "evolves_to": 33, "trigger": "level", "min_level": 16},
+      {"species_id": 33, "evolves_to": 34, "trigger": "item", "item": "moon stone"}
+    ]
+  },
+  "14": {
+    "chain": [
+      {"species_id": 35, "evolves_to": 36, "trigger": "item", "item": "moon stone"}
+    ]
+  },
+  "15": {
+    "chain": [
+      {"species_id": 37, "evolves_to": 38, "trigger": "item", "item": "fire stone"}
+    ]
+  },
+  "16": {
+    "chain": [
+      {"species_id": 39, "evolves_to": 40, "trigger": "item", "item": "moon stone"}
+    ]
+  },
+  "17": {
+    "chain": [
+      {"species_id": 41, "evolves_to": 42, "trigger": "level", "min_level": 22}
+    ]
+  },
+  "18": {
+    "chain": [
+      {"species_id": 43, "evolves_to": 44, "trigger": "level", "min_level": 21},
+      {"species_id": 44, "evolves_to": 45, "trigger": "item", "item": "leaf stone"}
+    ]
+  },
+  "19": {
+    "chain": [
+      {"species_id": 46, "evolves_to": 47, "trigger": "level", "min_level": 24}
+    ]
+  },
+  "20": {
+    "chain": [
+      {"species_id": 48, "evolves_to": 49, "trigger": "level", "min_level": 31}
+    ]
+  },
+  "21": {
+    "chain": [
+      {"species_id": 50, "evolves_to": 51, "trigger": "level", "min_level": 26}
+    ]
+  },
+  "22": {
+    "chain": [
+      {"species_id": 52, "evolves_to": 53, "trigger": "level", "min_level": 28}
+    ]
+  },
+  "23": {
+    "chain": [
+      {"species_id": 54, "evolves_to": 55, "trigger": "level", "min_level": 33}
+    ]
+  },
+  "24": {
+    "chain": [
+      {"species_id": 56, "evolves_to": 57, "trigger": "level", "min_level": 28}
+    ]
+  },
+  "25": {
+    "chain": [
+      {"species_id": 58, "evolves_to": 59, "trigger": "item", "item": "fire stone"}
+    ]
+  },
+  "26": {
+    "chain": [
+      {"species_id": 60, "evolves_to": 61, "trigger": "level", "min_level": 25},
+      {"species_id": 61, "evolves_to": 62, "trigger": "item", "item": "water stone"}
+    ]
+  },
+  "27": {
+    "chain": [
+      {"species_id": 63, "evolves_to": 64, "trigger": "level", "min_level": 16},
+      {"species_id": 64, "evolves_to": 65, "trigger": "trade"}
+    ]
+  },
+  "28": {
+    "chain": [
+      {"species_id": 66, "evolves_to": 67, "trigger": "level", "min_level": 28},
+      {"species_id": 67, "evolves_to": 68, "trigger": "trade"}
+    ]
+  },
+  "29": {
+    "chain": [
+      {"species_id": 69, "evolves_to": 70, "trigger": "level", "min_level": 21},
+      {"species_id": 70, "evolves_to": 71, "trigger": "item", "item": "leaf stone"}
+    ]
+  },
+  "30": {
+    "chain": [
+      {"species_id": 72, "evolves_to": 73, "trigger": "level", "min_level": 30}
+    ]
+  },
+  "31": {
+    "chain": [
+      {"species_id": 74, "evolves_to": 75, "trigger": "level", "min_level": 25},
+      {"species_id": 75, "evolves_to": 76, "trigger": "trade"}
+    ]
+  },
+  "32": {
+    "chain": [
+      {"species_id": 77, "evolves_to": 78, "trigger": "level", "min_level": 40}
+    ]
+  },
+  "33": {
+    "chain": [
+      {"species_id": 79, "evolves_to": 80, "trigger": "level", "min_level": 37}
+    ]
+  },
+  "34": {
+    "chain": [
+      {"species_id": 81, "evolves_to": 82, "trigger": "level", "min_level": 30}
+    ]
+  },
+  "36": {
+    "chain": [
+      {"species_id": 84, "evolves_to": 85, "trigger": "level", "min_level": 31}
+    ]
+  },
+  "37": {
+    "chain": [
+      {"species_id": 86, "evolves_to": 87, "trigger": "level", "min_level": 34}
+    ]
+  },
+  "38": {
+    "chain": [
+      {"species_id": 88, "evolves_to": 89, "trigger": "level", "min_level": 38}
+    ]
+  },
+  "39": {
+    "chain": [
+      {"species_id": 90, "evolves_to": 91, "trigger": "item", "item": "water stone"}
+    ]
+  },
+  "40": {
+    "chain": [
+      {"species_id": 92, "evolves_to": 93, "trigger": "level", "min_level": 25},
+      {"species_id": 93, "evolves_to": 94, "trigger": "trade"}
+    ]
+  },
+  "42": {
+    "chain": [
+      {"species_id": 96, "evolves_to": 97, "trigger": "level", "min_level": 26}
+    ]
+  },
+  "43": {
+    "chain": [
+      {"species_id": 98, "evolves_to": 99, "trigger": "level", "min_level": 28}
+    ]
+  },
+  "44": {
+    "chain": [
+      {"species_id": 100, "evolves_to": 101, "trigger": "level", "min_level": 30}
+    ]
+  },
+  "45": {
+    "chain": [
+      {"species_id": 102, "evolves_to": 103, "trigger": "item", "item": "leaf stone"}
+    ]
+  },
+  "46": {
+    "chain": [
+      {"species_id": 104, "evolves_to": 105, "trigger": "level", "min_level": 28}
+    ]
+  },
+  "49": {
+    "chain": [
+      {"species_id": 109, "evolves_to": 110, "trigger": "level", "min_level": 35}
+    ]
+  },
+  "50": {
+    "chain": [
+      {"species_id": 111, "evolves_to": 112, "trigger": "level", "min_level": 42}
+    ]
+  },
+  "52": {
+    "chain": [
+      {"species_id": 116, "evolves_to": 117, "trigger": "level", "min_level": 32}
+    ]
+  },
+  "53": {
+    "chain": [
+      {"species_id": 118, "evolves_to": 119, "trigger": "level", "min_level": 33}
+    ]
+  },
+  "54": {
+    "chain": [
+      {"species_id": 120, "evolves_to": 121, "trigger": "item", "item": "water stone"}
+    ]
+  },
+  "57": {
+    "chain": [
+      {"species_id": 129, "evolves_to": 130, "trigger": "level", "min_level": 20}
+    ]
+  },
+  "60": {
+    "chain": [
+      {"species_id": 133, "evolves_to": 134, "trigger": "item", "item": "water stone"},
+      {"species_id": 133, "evolves_to": 135, "trigger": "item", "item": "thunder stone"},
+      {"species_id": 133, "evolves_to": 136, "trigger": "item", "item": "fire stone"}
+    ]
+  },
+  "62": {
+    "chain": [
+      {"species_id": 138, "evolves_to": 139, "trigger": "level", "min_level": 40}
+    ]
+  },
+  "63": {
+    "chain": [
+      {"species_id": 140, "evolves_to": 141, "trigger": "level", "min_level": 40}
+    ]
+  },
+  "65": {
+    "chain": [
+      {"species_id": 147, "evolves_to": 148, "trigger": "level", "min_level": 30},
+      {"species_id": 148, "evolves_to": 149, "trigger": "level", "min_level": 55}
+    ]
+  }
+}

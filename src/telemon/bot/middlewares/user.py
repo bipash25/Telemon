@@ -6,6 +6,7 @@ from typing import Any
 from aiogram import BaseMiddleware
 from aiogram.types import CallbackQuery, Message, TelegramObject
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from telemon.database.models import User
@@ -21,7 +22,7 @@ class UserMiddleware(BaseMiddleware):
         data: dict[str, Any],
     ) -> Any:
         """Load or create user and inject into handler data."""
-        session: AsyncSession = data.get("session")
+        session: AsyncSession | None = data.get("session")
         if not session:
             # No session, skip user loading
             return await handler(event, data)
@@ -37,30 +38,28 @@ class UserMiddleware(BaseMiddleware):
             # No user info available
             return await handler(event, data)
 
-        # Load or create user
+        # Use upsert to avoid race conditions
+        stmt = insert(User).values(
+            telegram_id=user_info.id,
+            username=user_info.username,
+            first_name=user_info.first_name,
+            last_name=user_info.last_name,
+        ).on_conflict_do_update(
+            index_elements=[User.telegram_id],
+            set_={
+                "username": user_info.username,
+                "first_name": user_info.first_name,
+                "last_name": user_info.last_name,
+            }
+        )
+        await session.execute(stmt)
+        await session.flush()
+
+        # Now load the user
         result = await session.execute(
             select(User).where(User.telegram_id == user_info.id)
         )
-        user = result.scalar_one_or_none()
-
-        if not user:
-            # Create new user
-            user = User(
-                telegram_id=user_info.id,
-                username=user_info.username,
-                first_name=user_info.first_name,
-                last_name=user_info.last_name,
-            )
-            session.add(user)
-            await session.flush()
-        else:
-            # Update user info if changed
-            if user.username != user_info.username:
-                user.username = user_info.username
-            if user.first_name != user_info.first_name:
-                user.first_name = user_info.first_name
-            if user.last_name != user_info.last_name:
-                user.last_name = user_info.last_name
+        user = result.scalar_one()
 
         data["user"] = user
         return await handler(event, data)

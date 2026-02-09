@@ -7,9 +7,12 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from telemon.core.evolution import check_evolution, evolve_pokemon, get_possible_evolutions
 from telemon.database.models import Pokemon, PokemonSpecies, User
+from telemon.logging import get_logger
 
 router = Router(name="pokemon")
+logger = get_logger(__name__)
 
 POKEMON_PER_PAGE = 15
 
@@ -391,3 +394,126 @@ async def callback_release(
 
         await callback.message.edit_text(f" Goodbye, <b>{name}</b>...")
         await callback.answer("Released!")
+
+
+@router.message(Command("evolve"))
+async def cmd_evolve(message: Message, session: AsyncSession, user: User) -> None:
+    """Handle /evolve command to evolve a Pokemon."""
+    text = message.text or ""
+    args = text.split()
+
+    # Get Pokemon list for user
+    result = await session.execute(
+        select(Pokemon)
+        .where(Pokemon.owner_id == user.telegram_id)
+        .order_by(Pokemon.caught_at.desc())
+    )
+    pokemon_list = result.scalars().all()
+
+    if not pokemon_list:
+        await message.answer("You don't have any Pokemon!")
+        return
+
+    # Parse Pokemon index and optional item
+    pokemon_idx = None
+    item_name = None
+
+    if len(args) >= 2:
+        # First arg could be index or item name
+        if args[1].isdigit():
+            pokemon_idx = int(args[1])
+            if len(args) >= 3:
+                item_name = " ".join(args[2:])
+        else:
+            # No index specified, use selected pokemon
+            item_name = " ".join(args[1:])
+
+    # Get the target pokemon
+    if pokemon_idx:
+        if pokemon_idx < 1 or pokemon_idx > len(pokemon_list):
+            await message.answer(f"Invalid Pokemon ID! You have {len(pokemon_list)} Pokemon.")
+            return
+        poke = pokemon_list[pokemon_idx - 1]
+    elif user.selected_pokemon_id:
+        # Use selected pokemon
+        sel_result = await session.execute(
+            select(Pokemon)
+            .where(Pokemon.id == user.selected_pokemon_id)
+            .where(Pokemon.owner_id == user.telegram_id)
+        )
+        poke = sel_result.scalar_one_or_none()
+        if not poke:
+            await message.answer("Your selected Pokemon was not found. Use /evolve <id>")
+            return
+    else:
+        await message.answer(
+            "Please specify a Pokemon to evolve!\n"
+            "Usage: /evolve <pokemon_id> [item_name]\n"
+            "Example: /evolve 1\n"
+            "Example: /evolve 1 fire stone"
+        )
+        return
+
+    # Check evolution possibilities
+    evo_result = await check_evolution(
+        session, poke, user.telegram_id, use_item=item_name
+    )
+
+    if evo_result.can_evolve:
+        # Attempt evolution
+        success, message_text = await evolve_pokemon(
+            session, poke, user.telegram_id, use_item=item_name
+        )
+
+        if success:
+            # Refresh the Pokemon data
+            await session.refresh(poke)
+            
+            await message.answer(
+                f"<b>Congratulations!</b>\n\n"
+                f"{message_text}\n\n"
+                f"Your Pokemon is now a <b>{poke.species.name}</b>!"
+            )
+            
+            logger.info(
+                "Pokemon evolved successfully",
+                user_id=user.telegram_id,
+                pokemon_id=str(poke.id),
+                new_species=poke.species.name,
+            )
+        else:
+            await message.answer(f"Evolution failed: {message_text}")
+    else:
+        # Show evolution requirements
+        evolutions = get_possible_evolutions(poke.species_id)
+        
+        if not evolutions:
+            await message.answer(
+                f"<b>{poke.species.name}</b> cannot evolve."
+            )
+            return
+
+        lines = [f"<b>{poke.species.name}</b> Evolution Info\n"]
+        
+        if evo_result.evolved_species_name:
+            lines.append(f"Evolves to: <b>{evo_result.evolved_species_name}</b>")
+            lines.append(f"Requirement: {evo_result.requirement}")
+            lines.append(f"\n{evo_result.missing_requirement}")
+        else:
+            lines.append(evo_result.missing_requirement or "Cannot evolve.")
+
+        # Show available evolutions
+        if len(evolutions) > 1:
+            lines.append("\n<b>Possible Evolutions:</b>")
+            for evo in evolutions:
+                trigger = evo["trigger"]
+                if trigger == "level":
+                    lines.append(f"  Level {evo.get('min_level', '?')}+")
+                elif trigger == "item":
+                    lines.append(f"  {evo.get('item', 'Unknown item').title()}")
+                elif trigger == "trade":
+                    lines.append(f"  Trade")
+                elif trigger == "friendship":
+                    lines.append(f"  High Friendship")
+
+        await message.answer("\n".join(lines))
