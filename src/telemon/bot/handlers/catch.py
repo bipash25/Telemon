@@ -251,6 +251,27 @@ async def cmd_hint(message: Message, session: AsyncSession, user: User) -> None:
         await message.answer("There's no wild Pokemon here right now!")
         return
 
+    # Mark Pokemon as seen in user's pokedex
+    pokedex_result = await session.execute(
+        select(PokedexEntry)
+        .where(PokedexEntry.user_id == user_id)
+        .where(PokedexEntry.species_id == spawn.species_id)
+    )
+    pokedex_entry = pokedex_result.scalar_one_or_none()
+
+    if not pokedex_entry:
+        pokedex_entry = PokedexEntry(
+            user_id=user_id,
+            species_id=spawn.species_id,
+            seen=True,
+            caught=False,
+            caught_shiny=False,
+            times_caught=0,
+        )
+        session.add(pokedex_entry)
+    elif not pokedex_entry.seen:
+        pokedex_entry.seen = True
+
     # Update cooldown
     _hint_cooldowns[cooldown_key] = now
 

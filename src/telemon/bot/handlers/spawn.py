@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from telemon.config import settings
 from telemon.core.spawning import check_spawn_trigger, create_spawn, get_random_species
-from telemon.database.models import ActiveSpawn, Group, PokemonSpecies
+from telemon.database.models import ActiveSpawn, Group, PokedexEntry, PokemonSpecies
 from telemon.logging import get_logger
 
 router = Router(name="spawn")
@@ -133,6 +133,11 @@ async def track_group_message(
                 msg_id = await send_spawn_message(bot, chat_id, spawn)
                 if msg_id:
                     spawn.message_id = msg_id
+
+                    # Mark Pokemon as seen for all users who might see this message
+                    # For now, we'll mark it seen when users interact (catch/hint)
+                    # This avoids spamming the database for every group member
+
                     await session.commit()
 
                     logger.info(
