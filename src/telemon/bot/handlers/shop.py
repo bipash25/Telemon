@@ -64,7 +64,7 @@ async def cmd_buy(message: Message, session: AsyncSession, user: User) -> None:
     if len(args) < 2:
         await message.answer(
             "Please specify an item ID to buy!\n"
-            "Usage: /buy <item_id> [quantity]\n"
+            "Usage: /buy [item_id] [quantity]\n"
             "Example: /buy 201 5 (buy 5 Rare Candies)\n\n"
             "Use /shop to see item IDs."
         )
@@ -207,7 +207,7 @@ async def cmd_inventory(message: Message, session: AsyncSession, user: User) -> 
             for item_id, item_name, qty in categories[category]:
                 lines.append(f"  <code>{item_id}</code> {item_name} x{qty}")
 
-    lines.append("\n<i>Use /use <id> [pokemon_id] to use an item.</i>")
+    lines.append("\n<i>Use /use [item_id] [pokemon_id] to use an item.</i>")
 
     await message.answer("\n".join(lines))
 
@@ -222,7 +222,7 @@ async def cmd_use(message: Message, session: AsyncSession, user: User) -> None:
     if len(args) < 2:
         await message.answer(
             "Please specify an item ID to use!\n"
-            "Usage: /use <item_id> [pokemon_id]\n"
+            "Usage: /use [item_id] [pokemon_id]\n"
             "Example: /use 201 1 (use Rare Candy on Pokemon #1)"
         )
         return
@@ -286,7 +286,7 @@ async def cmd_use(message: Message, session: AsyncSession, user: User) -> None:
         if pokemon_idx is None:
             await message.answer(
                 "Please specify which Pokemon to use the Rare Candy on!\n"
-                "Usage: /use 201 <pokemon_id>\n"
+                "Usage: /use 201 [pokemon_id]\n"
                 "Example: /use 201 1"
             )
             return
@@ -342,7 +342,7 @@ async def cmd_use(message: Message, session: AsyncSession, user: User) -> None:
         await message.answer(
             f"<b>Battle Item</b>\n\n"
             f"{item.name} is a held item for battle.\n"
-            f"Use /give <pokemon_id> <item_id> to give it to a Pokemon."
+            f"Use /give [pokemon_id] [item_id] to give it to a Pokemon."
         )
     else:
         await message.answer(

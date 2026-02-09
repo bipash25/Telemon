@@ -51,7 +51,7 @@ async def cmd_catch(message: Message, session: AsyncSession, user: User) -> None
 
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
-        await message.answer(" Please specify the Pokemon name!\nUsage: /catch <name>")
+        await message.answer(" Please specify the Pokemon name!\nUsage: /catch [name]")
         return
 
     pokemon_name = args[1].strip().lower()

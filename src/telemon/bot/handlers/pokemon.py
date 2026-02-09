@@ -223,7 +223,7 @@ async def cmd_select(message: Message, session: AsyncSession, user: User) -> Non
     args = text.split()
 
     if len(args) < 2:
-        await message.answer(" Usage: /select <pokemon_id>")
+        await message.answer(" Usage: /select [pokemon_id]")
         return
 
     pokemon_id = args[1]
@@ -253,7 +253,7 @@ async def cmd_nickname(message: Message, session: AsyncSession, user: User) -> N
     args = text.split(maxsplit=2)
 
     if len(args) < 3:
-        await message.answer(" Usage: /nickname <pokemon_id> <new_name>")
+        await message.answer(" Usage: /nickname [pokemon_id] [new_name]")
         return
 
     pokemon_id = args[1]
@@ -285,7 +285,7 @@ async def cmd_favorite(message: Message, session: AsyncSession, user: User) -> N
     args = text.split()
 
     if len(args) < 2:
-        await message.answer(" Usage: /favorite <pokemon_id>")
+        await message.answer(" Usage: /favorite [pokemon_id]")
         return
 
     pokemon_id = args[1]
@@ -318,7 +318,7 @@ async def cmd_release(message: Message, session: AsyncSession, user: User) -> No
     args = text.split()
 
     if len(args) < 2:
-        await message.answer(" Usage: /release <pokemon_id>")
+        await message.answer(" Usage: /release [pokemon_id]")
         return
 
     pokemon_id = args[1]
@@ -448,7 +448,7 @@ async def cmd_evolve(message: Message, session: AsyncSession, user: User) -> Non
     else:
         await message.answer(
             "Please specify a Pokemon to evolve!\n"
-            "Usage: /evolve <pokemon_id> [item_name]\n"
+            "Usage: /evolve [pokemon_id] [item_name]\n"
             "Example: /evolve 1\n"
             "Example: /evolve 1 fire stone"
         )
