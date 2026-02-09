@@ -198,6 +198,22 @@ async def cmd_catch(message: Message, session: AsyncSession, user: User) -> None
     if group:
         group.total_catches += 1
 
+    # Update shiny hunt chain
+    chain_msg = ""
+    if user.shiny_hunt_species_id:
+        if user.shiny_hunt_species_id == spawn.species_id:
+            # Correct species - increment chain
+            user.shiny_hunt_chain += 1
+            chain_msg = f"\n🔗 Chain: {user.shiny_hunt_chain}"
+            if spawn.is_shiny:
+                chain_msg += " ✨ SHINY FOUND!"
+        else:
+            # Wrong species - break chain
+            old_chain = user.shiny_hunt_chain
+            if old_chain > 0:
+                user.shiny_hunt_chain = 0
+                chain_msg = f"\n⛓️‍💥 Chain broken! (was {old_chain})"
+
     session.add(new_pokemon)
     await session.commit()
 
@@ -214,7 +230,7 @@ async def cmd_catch(message: Message, session: AsyncSession, user: User) -> None
         f" Nature: {nature.capitalize()}\n"
         f" Ability: {ability}\n"
         f" Gender: {gender or 'Unknown'}\n\n"
-        f" +{reward} Telecoins"
+        f" +{reward} Telecoins{chain_msg}"
     )
 
 

@@ -39,6 +39,9 @@ SHOP_ITEMS = [
     {"id": 201, "name": "Rare Candy", "name_lower": "rare candy", "category": "utility", "cost": 200, "sell_price": 100, "is_consumable": True, "is_holdable": False},
     {"id": 202, "name": "Incense", "name_lower": "incense", "category": "utility", "cost": 500, "sell_price": 250, "is_consumable": True, "is_holdable": False},
     {"id": 203, "name": "XP Boost", "name_lower": "xp boost", "category": "utility", "cost": 300, "sell_price": 150, "is_consumable": True, "is_holdable": False},
+    # Special Items
+    {"id": 301, "name": "Shiny Charm", "name_lower": "shiny charm", "category": "special", "cost": 50000, "sell_price": 25000, "is_consumable": False, "is_holdable": False, "description": "Triples your shiny odds! A must-have for shiny hunters."},
+    {"id": 302, "name": "Oval Charm", "name_lower": "oval charm", "category": "special", "cost": 25000, "sell_price": 12500, "is_consumable": False, "is_holdable": False, "description": "Increases egg hatch speed."},
 ]
 
 
