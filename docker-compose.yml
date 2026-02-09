@@ -1,0 +1,54 @@
+version: "3.8"
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: telemon_postgres
+    environment:
+      POSTGRES_USER: telemon
+      POSTGRES_PASSWORD: telemon
+      POSTGRES_DB: telemon
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telemon -d telemon"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: telemon_redis
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Telemon Bot (for production)
+  # bot:
+  #   build: .
+  #   container_name: telemon_bot
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   env_file:
+  #     - .env
+  #   restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:

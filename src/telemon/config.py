@@ -1,0 +1,76 @@
+"""Configuration settings for Telemon."""
+
+from functools import lru_cache
+from typing import Literal
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """Application settings loaded from environment variables."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    # Bot Configuration
+    bot_token: str = Field(..., description="Telegram Bot API token")
+    bot_username: str = Field(default="telemon_bot", description="Bot username")
+
+    # Database Configuration
+    database_url: str = Field(
+        default="postgresql+asyncpg://telemon:telemon@localhost:5434/telemon",
+        description="PostgreSQL connection URL",
+    )
+    redis_url: str = Field(
+        default="redis://localhost:6380/0",
+        description="Redis connection URL",
+    )
+
+    # Spawning Configuration
+    spawn_message_threshold: int = Field(default=50, ge=1, le=1000)
+    spawn_time_min_minutes: int = Field(default=5, ge=1)
+    spawn_time_max_minutes: int = Field(default=15, ge=1)
+    spawn_timeout_seconds: int = Field(default=120, ge=30)
+
+    # Economy Configuration
+    daily_reward_base: int = Field(default=100, ge=1)
+    daily_streak_bonus: int = Field(default=10, ge=0)
+    daily_streak_max: int = Field(default=30, ge=1)
+    catch_reward_min: int = Field(default=10, ge=0)
+    catch_reward_max: int = Field(default=100, ge=1)
+    market_fee_percent: int = Field(default=5, ge=0, le=50)
+
+    # Battle Configuration
+    battle_turn_timeout_seconds: int = Field(default=60, ge=10)
+
+    # Shiny Configuration
+    shiny_base_rate: int = Field(default=4096, ge=1)
+
+    # Logging Configuration
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
+        default="INFO"
+    )
+    log_format: Literal["console", "json"] = Field(default="console")
+
+    # Development
+    debug: bool = Field(default=False)
+
+    @property
+    def database_url_sync(self) -> str:
+        """Get synchronous database URL for Alembic."""
+        return str(self.database_url).replace("+asyncpg", "")
+
+
+@lru_cache
+def get_settings() -> Settings:
+    """Get cached settings instance."""
+    return Settings()
+
+
+# Global settings instance
+settings = get_settings()
