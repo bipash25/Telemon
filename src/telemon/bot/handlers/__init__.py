@@ -7,6 +7,7 @@ from telemon.bot.handlers import (
     battle,
     catch,
     help_cmd,
+    leaderboard,
     market,
     pokedex,
     pokemon,
@@ -25,6 +26,7 @@ def register_all_handlers(dp: Dispatcher) -> None:
     dp.include_router(start.router)
     dp.include_router(help_cmd.router)
     dp.include_router(profile.router)
+    dp.include_router(leaderboard.router)
 
     # Pokemon handlers
     dp.include_router(catch.router)
