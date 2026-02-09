@@ -1,6 +1,6 @@
 """Catching-related handlers."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -9,9 +9,16 @@ from rapidfuzz import fuzz
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from telemon.database.models import ActiveSpawn, Pokemon, PokedexEntry, User
+from telemon.database.models import ActiveSpawn, Group, Pokemon, PokedexEntry, User
+from telemon.logging import get_logger
 
 router = Router(name="catch")
+logger = get_logger(__name__)
+
+# Track last hint time per user per chat (simple in-memory cache)
+# In production, use Redis for this
+_hint_cooldowns: dict[tuple[int, int], datetime] = {}
+HINT_COOLDOWN_SECONDS = 10
 
 
 def generate_hint(name: str, hints_used: int) -> str:
@@ -183,6 +190,14 @@ async def cmd_catch(message: Message, session: AsyncSession, user: User) -> None
         )
         session.add(pokedex_entry)
 
+    # Update group stats
+    group_result = await session.execute(
+        select(Group).where(Group.chat_id == chat_id)
+    )
+    group = group_result.scalar_one_or_none()
+    if group:
+        group.total_catches += 1
+
     session.add(new_pokemon)
     await session.commit()
 
@@ -205,8 +220,21 @@ async def cmd_catch(message: Message, session: AsyncSession, user: User) -> None
 
 @router.message(Command("hint"))
 async def cmd_hint(message: Message, session: AsyncSession, user: User) -> None:
-    """Handle /hint command."""
+    """Handle /hint command with cooldown."""
     chat_id = message.chat.id
+    user_id = user.telegram_id
+
+    # Check cooldown
+    cooldown_key = (chat_id, user_id)
+    now = datetime.utcnow()
+    
+    if cooldown_key in _hint_cooldowns:
+        last_hint = _hint_cooldowns[cooldown_key]
+        time_since = (now - last_hint).total_seconds()
+        if time_since < HINT_COOLDOWN_SECONDS:
+            remaining = int(HINT_COOLDOWN_SECONDS - time_since)
+            await message.answer(f"Please wait {remaining}s before using /hint again!")
+            return
 
     # Get active spawn
     result = await session.execute(
@@ -220,12 +248,15 @@ async def cmd_hint(message: Message, session: AsyncSession, user: User) -> None:
     spawn = result.scalar_one_or_none()
 
     if not spawn:
-        await message.answer(" There's no wild Pokemon here right now!")
+        await message.answer("There's no wild Pokemon here right now!")
         return
+
+    # Update cooldown
+    _hint_cooldowns[cooldown_key] = now
 
     # Generate hint
     hint = generate_hint(spawn.species.name, spawn.hints_used)
     spawn.hints_used += 1
     await session.commit()
 
-    await message.answer(f" Hint: <code>{hint}</code>")
+    await message.answer(f"Hint: <code>{hint}</code>")

@@ -10,6 +10,7 @@ from telemon.bot.handlers import (
     pokemon,
     profile,
     shop,
+    spawn,
     start,
     trade,
 )
@@ -33,6 +34,9 @@ def register_all_handlers(dp: Dispatcher) -> None:
 
     # Admin handlers
     dp.include_router(admin.router)
+
+    # Spawn handler (MUST be last - catches all group messages)
+    dp.include_router(spawn.router)
 
 
 __all__ = ["register_all_handlers"]
