@@ -9,6 +9,7 @@ from telemon.database.models.move import Move, PokemonLearnset
 from telemon.database.models.pokedex import PokedexEntry
 from telemon.database.models.pokemon import Pokemon
 from telemon.database.models.spawn import ActiveSpawn
+from telemon.database.models.spawn_admin import SpawnAdmin
 from telemon.database.models.species import PokemonSpecies
 from telemon.database.models.trade import Trade, TradeHistory, TradeStatus
 from telemon.database.models.user import User
@@ -29,6 +30,7 @@ __all__ = [
     "InventoryItem",
     # Features
     "ActiveSpawn",
+    "SpawnAdmin",
     "Trade",
     "TradeHistory",
     "TradeStatus",

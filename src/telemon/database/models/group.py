@@ -30,6 +30,9 @@ class Group(Base, TimestampMixin):
     message_count: Mapped[int] = mapped_column(Integer, default=0)
     last_spawn_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
+    # When the bot joined this group (for time-based spawns)
+    bot_joined_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
     # Redirect settings (send bot replies to specific channel)
     redirect_channel_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
