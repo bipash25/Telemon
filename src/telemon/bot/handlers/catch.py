@@ -231,6 +231,20 @@ async def cmd_catch(message: Message, session: AsyncSession, user: User) -> None
                 user.shiny_hunt_chain = 0
                 chain_msg = f"\n⛓️‍💥 Chain broken! (was {old_chain})"
 
+    # Friendship gain: selected Pokemon gets +1 per catch (Soothe Bell: +2)
+    if user.selected_pokemon_id:
+        sel_result = await session.execute(
+            select(Pokemon)
+            .where(Pokemon.id == user.selected_pokemon_id)
+            .where(Pokemon.owner_id == user.telegram_id)
+        )
+        sel_poke = sel_result.scalar_one_or_none()
+        if sel_poke and sel_poke.friendship < 255:
+            gain = 1
+            if sel_poke.held_item and sel_poke.held_item.lower() == "soothe bell":
+                gain = 2
+            sel_poke.friendship = min(255, sel_poke.friendship + gain)
+
     session.add(new_pokemon)
     await session.commit()
 

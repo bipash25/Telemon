@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from telemon.core.items import ITEM_BY_NAME, LINKING_CORD_ID
 from telemon.database.models import InventoryItem, Pokemon, PokemonSpecies
 from telemon.logging import get_logger
 
@@ -81,6 +82,18 @@ async def check_evolution(
     evolution_data = get_evolution_data()
     species_id = pokemon.species_id
 
+    # Special case: if the user is using a Linking Cord, treat as trade
+    use_item_lower = use_item.lower().strip() if use_item else None
+    using_linking_cord = use_item_lower == "linking cord"
+
+    if using_linking_cord:
+        is_trade = True
+        # The linking cord doesn't act as a trade-item (e.g. metal coat),
+        # it just triggers the trade itself. So clear use_item for the
+        # trade-with-item check below and let it match "trade, item=none".
+        use_item = None
+        use_item_lower = None
+
     # Find evolution chain for this species
     possible_evolutions = []
 
@@ -132,7 +145,7 @@ async def check_evolution(
         elif trigger == "item":
             required_item = evo.get("item", "").lower()
 
-            if use_item and use_item.lower() == required_item:
+            if use_item_lower and use_item_lower == required_item:
                 return EvolutionResult(
                     can_evolve=True,
                     evolved_species_id=evolves_to,
@@ -140,14 +153,13 @@ async def check_evolution(
                     trigger="item",
                     requirement=required_item.title(),
                 )
-            elif use_item:
-                # Wrong item
+            elif use_item_lower:
+                # Wrong item — try next evolution
                 continue
             else:
-                # Check if user has the item
-                from telemon.bot.handlers.shop import SHOP_ITEMS
-
-                item_data = SHOP_ITEMS.get(required_item)
+                # No item specified — tell user what's needed
+                item_data = ITEM_BY_NAME.get(required_item)
+                has_item = False
                 if item_data:
                     inv_result = await session.execute(
                         select(InventoryItem)
@@ -156,8 +168,6 @@ async def check_evolution(
                         .where(InventoryItem.quantity > 0)
                     )
                     has_item = inv_result.scalar_one_or_none() is not None
-                else:
-                    has_item = False
 
                 return EvolutionResult(
                     can_evolve=False,
@@ -166,26 +176,93 @@ async def check_evolution(
                     trigger="item",
                     requirement=required_item.title(),
                     missing_requirement=f"Requires {required_item.title()}"
-                    + (" (you have it!)" if has_item else " (not in inventory)"),
+                    + (" (you have it! Use: /evolve [num] {})".format(required_item) if has_item else " (buy from /shop)"),
                 )
 
         elif trigger == "trade":
+            trade_item = evo.get("item")
+
             if is_trade:
-                return EvolutionResult(
-                    can_evolve=True,
-                    evolved_species_id=evolves_to,
-                    evolved_species_name=evolved_species.name,
-                    trigger="trade",
-                    requirement="Trade",
-                )
+                if trade_item and trade_item != "none":
+                    # Trade evolution that also requires a held item
+                    # When using Linking Cord, the user must also specify the item
+                    if using_linking_cord:
+                        # Check if user has the trade item
+                        item_data = ITEM_BY_NAME.get(trade_item.lower())
+                        has_item = False
+                        if item_data:
+                            inv_result = await session.execute(
+                                select(InventoryItem)
+                                .where(InventoryItem.user_id == user_id)
+                                .where(InventoryItem.item_id == item_data["id"])
+                                .where(InventoryItem.quantity > 0)
+                            )
+                            has_item = inv_result.scalar_one_or_none() is not None
+
+                        if has_item:
+                            return EvolutionResult(
+                                can_evolve=True,
+                                evolved_species_id=evolves_to,
+                                evolved_species_name=evolved_species.name,
+                                trigger="trade",
+                                requirement=f"Trade + {trade_item.title()}",
+                            )
+                        else:
+                            return EvolutionResult(
+                                can_evolve=False,
+                                evolved_species_id=evolves_to,
+                                evolved_species_name=evolved_species.name,
+                                trigger="trade",
+                                requirement=f"Trade + {trade_item.title()}",
+                                missing_requirement=f"Also requires {trade_item.title()} (buy from /shop)",
+                            )
+                    else:
+                        # Real trade — check if the traded Pokemon holds the item
+                        # For now, we let real trades evolve regardless of held item
+                        return EvolutionResult(
+                            can_evolve=True,
+                            evolved_species_id=evolves_to,
+                            evolved_species_name=evolved_species.name,
+                            trigger="trade",
+                            requirement=f"Trade + {trade_item.title()}",
+                        )
+                else:
+                    # Simple trade evolution (no item needed)
+                    return EvolutionResult(
+                        can_evolve=True,
+                        evolved_species_id=evolves_to,
+                        evolved_species_name=evolved_species.name,
+                        trigger="trade",
+                        requirement="Trade",
+                    )
             else:
+                # Not trading — show requirement
+                req = "Trade"
+                if trade_item and trade_item != "none":
+                    req += f" + {trade_item.title()}"
+
+                # Check if user has a Linking Cord
+                inv_result = await session.execute(
+                    select(InventoryItem)
+                    .where(InventoryItem.user_id == user_id)
+                    .where(InventoryItem.item_id == LINKING_CORD_ID)
+                    .where(InventoryItem.quantity > 0)
+                )
+                has_cord = inv_result.scalar_one_or_none() is not None
+
+                hint = "Trade with another trainer"
+                if has_cord:
+                    hint += " or use: /evolve [num] linking cord"
+                else:
+                    hint += " or buy a Linking Cord from /shop"
+
                 return EvolutionResult(
                     can_evolve=False,
                     evolved_species_id=evolves_to,
                     evolved_species_name=evolved_species.name,
                     trigger="trade",
-                    requirement="Trade",
-                    missing_requirement="Evolves when traded to another trainer",
+                    requirement=req,
+                    missing_requirement=hint,
                 )
 
         elif trigger == "friendship":
@@ -205,7 +282,7 @@ async def check_evolution(
                     evolved_species_name=evolved_species.name,
                     trigger="friendship",
                     requirement=f"Friendship {min_friendship}+",
-                    missing_requirement=f"Needs {min_friendship} friendship (currently {pokemon.friendship})",
+                    missing_requirement=f"Needs {min_friendship} friendship (currently {pokemon.friendship}). Use /pet to increase!",
                 )
 
     return EvolutionResult(
@@ -234,6 +311,9 @@ async def evolve_pokemon(
     Returns:
         Tuple of (success, message)
     """
+    use_item_lower = use_item.lower().strip() if use_item else None
+    using_linking_cord = use_item_lower == "linking cord"
+
     # Check if can evolve
     result = await check_evolution(session, pokemon, user_id, use_item, is_trade)
 
@@ -253,11 +333,9 @@ async def evolve_pokemon(
 
     old_species_name = pokemon.species.name
 
-    # If item evolution, consume the item
+    # Consume the item if used
     if result.trigger == "item" and use_item:
-        from telemon.bot.handlers.shop import SHOP_ITEMS
-
-        item_data = SHOP_ITEMS.get(use_item.lower())
+        item_data = ITEM_BY_NAME.get(use_item.lower().strip())
         if item_data:
             inv_result = await session.execute(
                 select(InventoryItem)
@@ -270,6 +348,42 @@ async def evolve_pokemon(
                 inventory_item.quantity -= 1
             else:
                 return False, f"You don't have a {use_item.title()}!"
+
+    # If Linking Cord was used, consume it
+    if using_linking_cord:
+        inv_result = await session.execute(
+            select(InventoryItem)
+            .where(InventoryItem.user_id == user_id)
+            .where(InventoryItem.item_id == LINKING_CORD_ID)
+            .where(InventoryItem.quantity > 0)
+        )
+        cord_item = inv_result.scalar_one_or_none()
+        if cord_item:
+            cord_item.quantity -= 1
+        else:
+            return False, "You don't have a Linking Cord!"
+
+        # If the trade evolution also needs an item, consume that too
+        evolution_data = get_evolution_data()
+        for chain_id, chain_data in evolution_data.items():
+            for evo in chain_data.get("chain", []):
+                if evo["species_id"] == pokemon.species_id and evo["evolves_to"] == result.evolved_species_id:
+                    trade_item = evo.get("item")
+                    if trade_item and trade_item != "none":
+                        item_data = ITEM_BY_NAME.get(trade_item.lower())
+                        if item_data:
+                            inv_result = await session.execute(
+                                select(InventoryItem)
+                                .where(InventoryItem.user_id == user_id)
+                                .where(InventoryItem.item_id == item_data["id"])
+                                .where(InventoryItem.quantity > 0)
+                            )
+                            trade_inv = inv_result.scalar_one_or_none()
+                            if trade_inv:
+                                trade_inv.quantity -= 1
+                            else:
+                                return False, f"You don't have a {trade_item.title()}!"
+                    break
 
     # Evolve the Pokemon
     pokemon.species_id = result.evolved_species_id

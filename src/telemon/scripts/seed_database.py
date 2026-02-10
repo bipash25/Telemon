@@ -7,6 +7,7 @@ from pathlib import Path
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert
 
+from telemon.core.items import ALL_ITEMS
 from telemon.database import async_session_factory, init_db
 from telemon.database.models import Item, PokemonSpecies
 from telemon.logging import get_logger, setup_logging
@@ -14,51 +15,45 @@ from telemon.logging import get_logger, setup_logging
 logger = get_logger(__name__)
 
 
-SHOP_ITEMS = [
-    # Evolution Stones
-    {"id": 1, "name": "Fire Stone", "name_lower": "fire stone", "category": "evolution", "cost": 500, "sell_price": 250, "is_consumable": True, "is_holdable": False},
-    {"id": 2, "name": "Water Stone", "name_lower": "water stone", "category": "evolution", "cost": 500, "sell_price": 250, "is_consumable": True, "is_holdable": False},
-    {"id": 3, "name": "Thunder Stone", "name_lower": "thunder stone", "category": "evolution", "cost": 500, "sell_price": 250, "is_consumable": True, "is_holdable": False},
-    {"id": 4, "name": "Leaf Stone", "name_lower": "leaf stone", "category": "evolution", "cost": 500, "sell_price": 250, "is_consumable": True, "is_holdable": False},
-    {"id": 5, "name": "Moon Stone", "name_lower": "moon stone", "category": "evolution", "cost": 500, "sell_price": 250, "is_consumable": True, "is_holdable": False},
-    {"id": 6, "name": "Sun Stone", "name_lower": "sun stone", "category": "evolution", "cost": 500, "sell_price": 250, "is_consumable": True, "is_holdable": False},
-    {"id": 7, "name": "Dusk Stone", "name_lower": "dusk stone", "category": "evolution", "cost": 500, "sell_price": 250, "is_consumable": True, "is_holdable": False},
-    {"id": 8, "name": "Dawn Stone", "name_lower": "dawn stone", "category": "evolution", "cost": 500, "sell_price": 250, "is_consumable": True, "is_holdable": False},
-    {"id": 9, "name": "Shiny Stone", "name_lower": "shiny stone", "category": "evolution", "cost": 500, "sell_price": 250, "is_consumable": True, "is_holdable": False},
-    {"id": 10, "name": "Ice Stone", "name_lower": "ice stone", "category": "evolution", "cost": 500, "sell_price": 250, "is_consumable": True, "is_holdable": False},
-    # Battle Items
-    {"id": 101, "name": "Leftovers", "name_lower": "leftovers", "category": "battle", "cost": 1000, "sell_price": 500, "is_consumable": False, "is_holdable": True},
-    {"id": 102, "name": "Choice Band", "name_lower": "choice band", "category": "battle", "cost": 1500, "sell_price": 750, "is_consumable": False, "is_holdable": True},
-    {"id": 103, "name": "Choice Specs", "name_lower": "choice specs", "category": "battle", "cost": 1500, "sell_price": 750, "is_consumable": False, "is_holdable": True},
-    {"id": 104, "name": "Choice Scarf", "name_lower": "choice scarf", "category": "battle", "cost": 1500, "sell_price": 750, "is_consumable": False, "is_holdable": True},
-    {"id": 105, "name": "Life Orb", "name_lower": "life orb", "category": "battle", "cost": 2000, "sell_price": 1000, "is_consumable": False, "is_holdable": True},
-    {"id": 106, "name": "Focus Sash", "name_lower": "focus sash", "category": "battle", "cost": 1000, "sell_price": 500, "is_consumable": False, "is_holdable": True},
-    {"id": 107, "name": "Assault Vest", "name_lower": "assault vest", "category": "battle", "cost": 1500, "sell_price": 750, "is_consumable": False, "is_holdable": True},
-    {"id": 108, "name": "Rocky Helmet", "name_lower": "rocky helmet", "category": "battle", "cost": 1000, "sell_price": 500, "is_consumable": False, "is_holdable": True},
-    # Utility Items
-    {"id": 201, "name": "Rare Candy", "name_lower": "rare candy", "category": "utility", "cost": 200, "sell_price": 100, "is_consumable": True, "is_holdable": False},
-    {"id": 202, "name": "Incense", "name_lower": "incense", "category": "utility", "cost": 500, "sell_price": 250, "is_consumable": True, "is_holdable": False},
-    {"id": 203, "name": "XP Boost", "name_lower": "xp boost", "category": "utility", "cost": 300, "sell_price": 150, "is_consumable": True, "is_holdable": False},
-    # Special Items
-    {"id": 301, "name": "Shiny Charm", "name_lower": "shiny charm", "category": "special", "cost": 50000, "sell_price": 25000, "is_consumable": False, "is_holdable": False, "description": "Triples your shiny odds! A must-have for shiny hunters."},
-    {"id": 302, "name": "Oval Charm", "name_lower": "oval charm", "category": "special", "cost": 25000, "sell_price": 12500, "is_consumable": False, "is_holdable": False, "description": "Increases egg hatch speed."},
-]
-
-
 async def seed_items() -> None:
-    """Seed the items table."""
+    """Seed the items table from the centralized catalog."""
     async with async_session_factory() as session:
-        for item_data in SHOP_ITEMS:
-            stmt = insert(Item).values(**item_data).on_conflict_do_nothing(index_elements=["id"])
+        for item_data in ALL_ITEMS:
+            # Only include fields the Item model has
+            values = {
+                "id": item_data["id"],
+                "name": item_data["name"],
+                "name_lower": item_data["name_lower"],
+                "category": item_data["category"],
+                "cost": item_data["cost"],
+                "sell_price": item_data["sell_price"],
+                "is_consumable": item_data.get("is_consumable", True),
+                "is_holdable": item_data.get("is_holdable", False),
+                "description": item_data.get("description"),
+            }
+            stmt = insert(Item).values(**values)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["id"],
+                set_={
+                    "name": values["name"],
+                    "name_lower": values["name_lower"],
+                    "category": values["category"],
+                    "cost": values["cost"],
+                    "sell_price": values["sell_price"],
+                    "is_consumable": values["is_consumable"],
+                    "is_holdable": values["is_holdable"],
+                    "description": values["description"],
+                },
+            )
             await session.execute(stmt)
         await session.commit()
-        logger.info("Seeded items table", count=len(SHOP_ITEMS))
+        logger.info("Seeded items table", count=len(ALL_ITEMS))
 
 
 async def seed_pokemon() -> None:
     """Seed Pokemon species from JSON file."""
     data_path = Path(__file__).parent.parent.parent.parent / "data" / "pokemon.json"
-    
+
     if not data_path.exists():
         logger.warning("Pokemon data file not found", path=str(data_path))
         return
@@ -69,10 +64,10 @@ async def seed_pokemon() -> None:
     async with async_session_factory() as session:
         # Count existing Pokemon
         result = await session.execute(text("SELECT COUNT(*) FROM pokemon_species"))
-        existing_count = result.scalar()
-        
+        existing_count = result.scalar() or 0
+
         logger.info(f"Found {existing_count} existing Pokemon, loading {len(pokemon_data)} from JSON")
-        
+
         # Use upsert to add new Pokemon and update existing ones
         for poke in pokemon_data:
             stmt = insert(PokemonSpecies).values(**poke)
@@ -111,11 +106,11 @@ async def seed_pokemon() -> None:
             await session.execute(stmt)
 
         await session.commit()
-        
+
         # Count after seeding
         result = await session.execute(text("SELECT COUNT(*) FROM pokemon_species"))
-        new_count = result.scalar()
-        
+        new_count = result.scalar() or 0
+
         logger.info("Seeded Pokemon species", before=existing_count, after=new_count, added=new_count - existing_count)
 
 
@@ -123,12 +118,12 @@ async def main() -> None:
     """Run all seed functions."""
     setup_logging()
     await init_db()
-    
+
     logger.info("Starting database seeding...")
-    
+
     await seed_items()
     await seed_pokemon()
-    
+
     logger.info("Database seeding complete!")
 
 

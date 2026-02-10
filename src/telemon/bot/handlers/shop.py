@@ -1,4 +1,4 @@
-"""Shop-related handlers."""
+"""Shop, inventory, and item usage handlers."""
 
 from aiogram import Router
 from aiogram.filters import Command
@@ -6,52 +6,101 @@ from aiogram.types import Message
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from telemon.core.evolution import check_evolution, evolve_pokemon, get_possible_evolutions
+from telemon.core.items import (
+    ALL_ITEMS,
+    ITEM_BY_ID,
+    ITEM_BY_NAME,
+    LINKING_CORD_ID,
+    RARE_CANDY_ID,
+    SOOTHE_BELL_ID,
+)
 from telemon.database.models import InventoryItem, Item, Pokemon, User
 from telemon.logging import get_logger
 
 router = Router(name="shop")
 logger = get_logger(__name__)
 
+# Friendship gain from /pet
+PET_FRIENDSHIP_GAIN = 5
+SOOTHE_BELL_MULTIPLIER = 2
 
-SHOP_MESSAGE = """
-<b>Telemon Shop</b>
 
-<b>Evolution Stones</b>
-<code>1</code> Fire Stone - 500 TC
-<code>2</code> Water Stone - 500 TC
-<code>3</code> Thunder Stone - 500 TC
-<code>4</code> Leaf Stone - 500 TC
-<code>5</code> Moon Stone - 500 TC
-<code>6</code> Sun Stone - 500 TC
-<code>7</code> Dusk Stone - 500 TC
-<code>8</code> Dawn Stone - 500 TC
-<code>9</code> Shiny Stone - 500 TC
-<code>10</code> Ice Stone - 500 TC
+def build_shop_message() -> str:
+    """Build the shop display dynamically from the item catalog."""
+    lines = ["<b>Telemon Shop</b>\n"]
 
-<b>Battle Items</b>
-<code>101</code> Leftovers - 1,000 TC
-<code>102</code> Choice Band - 1,500 TC
-<code>103</code> Choice Specs - 1,500 TC
-<code>104</code> Choice Scarf - 1,500 TC
-<code>105</code> Life Orb - 2,000 TC
-<code>106</code> Focus Sash - 1,000 TC
-<code>107</code> Assault Vest - 1,500 TC
-<code>108</code> Rocky Helmet - 1,000 TC
+    # Group items by category
+    categories = [
+        ("Evolution Stones", [i for i in ALL_ITEMS if i["category"] == "evolution" and i["id"] <= 10]),
+        ("Evolution Items", [i for i in ALL_ITEMS if i["category"] == "evolution" and 11 <= i["id"] <= 28]),
+        ("Special Evolution", [i for i in ALL_ITEMS if i["category"] == "evolution" and i["id"] == 29]),
+        ("Battle Items", [i for i in ALL_ITEMS if i["category"] == "battle"]),
+        ("Utility Items", [i for i in ALL_ITEMS if i["category"] == "utility"]),
+        ("Special Items", [i for i in ALL_ITEMS if i["category"] == "special"]),
+    ]
 
-<b>Utility Items</b>
-<code>201</code> Rare Candy - 200 TC
-<code>202</code> Incense - 500 TC
-<code>203</code> XP Boost - 300 TC
+    for cat_name, items in categories:
+        if not items:
+            continue
+        lines.append(f"\n<b>{cat_name}</b>")
+        for item in items:
+            lines.append(f"  <code>{item['id']}</code> {item['name']} — {item['cost']:,} TC")
 
-<i>Use /buy &lt;id&gt; [quantity] to purchase!</i>
-<i>Example: /buy 201 5 (buy 5 Rare Candies)</i>
-"""
+    lines.append("\n<i>Use /buy [id] [qty] to purchase!</i>")
+    lines.append("<i>Example: /buy 201 5 (buy 5 Rare Candies)</i>")
+    lines.append("<i>Use /shopinfo [id] for item details.</i>")
+
+    return "\n".join(lines)
 
 
 @router.message(Command("shop"))
 async def cmd_shop(message: Message) -> None:
     """Handle /shop command."""
-    await message.answer(SHOP_MESSAGE)
+    await message.answer(build_shop_message())
+
+
+@router.message(Command("shopinfo", "iteminfo"))
+async def cmd_shopinfo(message: Message) -> None:
+    """Show detailed info about a shop item."""
+    text = message.text or ""
+    args = text.split()
+
+    if len(args) < 2:
+        await message.answer("Usage: /shopinfo [item_id]\nExample: /shopinfo 29")
+        return
+
+    try:
+        item_id = int(args[1])
+    except ValueError:
+        # Try by name
+        name = " ".join(args[1:]).lower()
+        item_data = ITEM_BY_NAME.get(name)
+        if not item_data:
+            await message.answer("Item not found! Use /shop to see item IDs.")
+            return
+        item_id = item_data["id"]
+
+    item_data = ITEM_BY_ID.get(item_id)
+    if not item_data:
+        await message.answer("Item not found! Use /shop to see item IDs.")
+        return
+
+    desc = item_data.get("description", "No description available.")
+    props = []
+    if item_data.get("is_consumable"):
+        props.append("Consumable")
+    if item_data.get("is_holdable"):
+        props.append("Holdable")
+
+    await message.answer(
+        f"<b>{item_data['name']}</b> (ID: {item_data['id']})\n\n"
+        f"{desc}\n\n"
+        f"<b>Category:</b> {item_data['category'].title()}\n"
+        f"<b>Cost:</b> {item_data['cost']:,} TC\n"
+        f"<b>Sell:</b> {item_data['sell_price']:,} TC\n"
+        f"<b>Properties:</b> {', '.join(props) if props else 'None'}"
+    )
 
 
 @router.message(Command("buy"))
@@ -201,13 +250,13 @@ async def cmd_inventory(message: Message, session: AsyncSession, user: User) -> 
     # Build message
     lines = ["<b>Your Inventory</b>\n"]
 
-    for category in ["Evolution", "Battle", "Utility", "Other"]:
+    for category in ["Evolution", "Battle", "Utility", "Special", "Other"]:
         if category in categories:
             lines.append(f"\n<b>{category} Items</b>")
             for item_id, item_name, qty in categories[category]:
                 lines.append(f"  <code>{item_id}</code> {item_name} x{qty}")
 
-    lines.append("\n<i>Use /use [item_id] [pokemon_id] to use an item.</i>")
+    lines.append("\n<i>Use /use [item_id] [pokemon#] to use an item.</i>")
 
     await message.answer("\n".join(lines))
 
@@ -222,8 +271,9 @@ async def cmd_use(message: Message, session: AsyncSession, user: User) -> None:
     if len(args) < 2:
         await message.answer(
             "Please specify an item ID to use!\n"
-            "Usage: /use [item_id] [pokemon_id]\n"
-            "Example: /use 201 1 (use Rare Candy on Pokemon #1)"
+            "Usage: /use [item_id] [pokemon#]\n"
+            "Example: /use 201 1 (use Rare Candy on Pokemon #1)\n"
+            "Example: /use 29 (use Linking Cord on selected Pokemon)"
         )
         return
 
@@ -243,7 +293,7 @@ async def cmd_use(message: Message, session: AsyncSession, user: User) -> None:
         try:
             pokemon_idx = int(args[2])
         except ValueError:
-            await message.answer("Invalid Pokemon ID! Use a number.")
+            await message.answer("Invalid Pokemon number! Use a number.")
             return
 
     # Check if user has this item
@@ -272,80 +322,237 @@ async def cmd_use(message: Message, session: AsyncSession, user: User) -> None:
         await message.answer("Item not found!")
         return
 
-    # Handle different item types based on category
     category = item.category.lower() if item.category else ""
 
+    # ── Evolution items: direct use triggers evolution ──
     if category == "evolution":
-        await message.answer(
-            f"<b>Evolution Stone</b>\n\n"
-            f"To use {item.name}, use the /evolve command:\n"
-            f"<code>/evolve [pokemon_id]</code>\n\n"
-            f"<i>The stone will be used automatically if the Pokemon can evolve with it.</i>"
+        # Get the target Pokemon
+        poke = await _resolve_use_target(session, user, pokemon_idx)
+        if poke is None:
+            await message.answer(
+                f"Please specify which Pokemon to use {item.name} on!\n"
+                f"Usage: /use {item_id} [pokemon#]\n"
+                f"Or select a Pokemon first with /select [number]"
+            )
+            return
+
+        # Is this a Linking Cord?
+        if item_id == LINKING_CORD_ID:
+            # Try trade evolution
+            success, msg = await evolve_pokemon(
+                session, poke, user.telegram_id, use_item="linking cord"
+            )
+            if success:
+                await session.refresh(poke)
+                await message.answer(
+                    f"<b>Linking Cord Used!</b>\n\n"
+                    f"{msg}\n\n"
+                    f"Your Pokemon is now a <b>{poke.species.name}</b>!"
+                )
+            else:
+                await message.answer(
+                    f"Cannot use Linking Cord on {poke.display_name}.\n{msg}"
+                )
+            return
+
+        # Regular evolution item
+        success, msg = await evolve_pokemon(
+            session, poke, user.telegram_id, use_item=item.name
         )
-    elif item_id == 201:  # Rare Candy
-        if pokemon_idx is None:
+        if success:
+            await session.refresh(poke)
+            await message.answer(
+                f"<b>{item.name} Used!</b>\n\n"
+                f"{msg}\n\n"
+                f"Your Pokemon is now a <b>{poke.species.name}</b>!"
+            )
+        else:
+            await message.answer(
+                f"Cannot use {item.name} on {poke.display_name}.\n{msg}"
+            )
+        return
+
+    # ── Rare Candy ──
+    if item_id == RARE_CANDY_ID:
+        poke = await _resolve_use_target(session, user, pokemon_idx)
+        if poke is None:
             await message.answer(
                 "Please specify which Pokemon to use the Rare Candy on!\n"
-                "Usage: /use 201 [pokemon_id]\n"
+                "Usage: /use 201 [pokemon#]\n"
                 "Example: /use 201 1"
             )
             return
 
-        # Get the pokemon
-        poke_result = await session.execute(
-            select(Pokemon)
-            .where(Pokemon.owner_id == user.telegram_id)
-            .order_by(Pokemon.caught_at.desc())
-        )
-        pokemon_list = poke_result.scalars().all()
-
-        if pokemon_idx < 1 or pokemon_idx > len(pokemon_list):
-            await message.answer(f"Invalid Pokemon ID! You have {len(pokemon_list)} Pokemon.")
-            return
-
-        pokemon = pokemon_list[pokemon_idx - 1]
-
-        if pokemon.level >= 100:
-            await message.answer(f"{pokemon.species.name} is already at max level!")
+        if poke.level >= 100:
+            await message.answer(f"{poke.display_name} is already at max level!")
             return
 
         # Use the rare candy
-        pokemon.level += 1
+        poke.level += 1
+        poke.friendship = min(255, poke.friendship + 3)
         inventory_item.quantity -= 1
         await session.commit()
 
         await message.answer(
             f"<b>Rare Candy Used!</b>\n\n"
-            f"{pokemon.nickname or pokemon.species.name} grew to Lv.{pokemon.level}!\n\n"
+            f"{poke.display_name} grew to Lv.{poke.level}!\n\n"
             f"<i>Rare Candies remaining: {inventory_item.quantity}</i>"
         )
 
         logger.info(
             "User used rare candy",
             user_id=user.telegram_id,
-            pokemon=pokemon.species.name,
-            new_level=pokemon.level,
+            pokemon=poke.species.name,
+            new_level=poke.level,
         )
-    elif item_id == 202:  # Incense
+
+        # Check if can evolve now
+        evo_result = await check_evolution(session, poke, user.telegram_id)
+        if evo_result.can_evolve and evo_result.trigger == "level":
+            await message.answer(
+                f"{poke.display_name} is ready to evolve! Use /evolve to evolve it."
+            )
+        return
+
+    # ── Soothe Bell ──
+    if item_id == SOOTHE_BELL_ID:
+        poke = await _resolve_use_target(session, user, pokemon_idx)
+        if poke is None:
+            await message.answer(
+                "Please specify which Pokemon to give the Soothe Bell to!\n"
+                "Usage: /use 30 [pokemon#]"
+            )
+            return
+
+        poke.held_item = "Soothe Bell"
+        await session.commit()
+
+        await message.answer(
+            f"<b>Soothe Bell</b>\n\n"
+            f"{poke.display_name} is now holding a Soothe Bell!\n"
+            f"Friendship gains are doubled while holding this item.\n\n"
+            f"Current friendship: {poke.friendship}/255"
+        )
+        return
+
+    # ── Incense ──
+    if item_id == 202:
         await message.answer(
             "<b>Incense</b>\n\n"
             "Incense feature coming soon!\n"
             "When activated, Pokemon will spawn in your DMs for 1 hour."
         )
-    elif item_id == 203:  # XP Boost
+        return
+
+    # ── XP Boost ──
+    if item_id == 203:
         await message.answer(
             "<b>XP Boost</b>\n\n"
             "XP Boost feature coming soon!\n"
             "When activated, you'll earn 2x XP for 1 hour."
         )
-    elif category == "battle":
+        return
+
+    # ── Battle items ──
+    if category == "battle":
+        poke = await _resolve_use_target(session, user, pokemon_idx)
+        if poke is None:
+            await message.answer(
+                f"Please specify which Pokemon to give {item.name} to!\n"
+                f"Usage: /use {item_id} [pokemon#]"
+            )
+            return
+
+        poke.held_item = item.name
+        await session.commit()
+
         await message.answer(
-            f"<b>Battle Item</b>\n\n"
-            f"{item.name} is a held item for battle.\n"
-            f"Use /give [pokemon_id] [item_id] to give it to a Pokemon."
+            f"<b>{item.name} Equipped!</b>\n\n"
+            f"{poke.display_name} is now holding {item.name}."
         )
-    else:
+        return
+
+    await message.answer(
+        f"Cannot use {item.name} directly.\n"
+        f"Check /help for how to use this item."
+    )
+
+
+@router.message(Command("pet"))
+async def cmd_pet(message: Message, session: AsyncSession, user: User) -> None:
+    """Handle /pet command to increase friendship of selected Pokemon."""
+    text = message.text or ""
+    args = text.split()
+
+    arg = args[1] if len(args) >= 2 else None
+    poke = await _resolve_use_target(session, user, int(arg) if arg and arg.isdigit() else None)
+
+    if not poke:
         await message.answer(
-            f"Cannot use {item.name} directly.\n"
-            f"Check /help for how to use this item."
+            "No Pokemon selected!\n"
+            "Usage: /pet [pokemon#] or /pet (uses selected Pokemon)"
         )
+        return
+
+    if poke.friendship >= 255:
+        await message.answer(
+            f"{poke.display_name} already has maximum friendship! (255/255)\n"
+            f"❤️ Your bond couldn't be stronger!"
+        )
+        return
+
+    # Calculate friendship gain
+    gain = PET_FRIENDSHIP_GAIN
+    has_soothe_bell = poke.held_item and poke.held_item.lower() == "soothe bell"
+    if has_soothe_bell:
+        gain *= SOOTHE_BELL_MULTIPLIER
+
+    old_friendship = poke.friendship
+    poke.friendship = min(255, poke.friendship + gain)
+    actual_gain = poke.friendship - old_friendship
+    await session.commit()
+
+    bell_text = " (Soothe Bell bonus!)" if has_soothe_bell else ""
+    hearts = "❤️" * min(5, poke.friendship // 50)
+
+    response = (
+        f"You pet <b>{poke.display_name}</b>!\n"
+        f"Friendship: {poke.friendship}/255 (+{actual_gain}{bell_text})\n"
+        f"{hearts}"
+    )
+
+    # Check if can evolve with friendship now
+    evo_result = await check_evolution(session, poke, user.telegram_id)
+    if evo_result.can_evolve and evo_result.trigger == "friendship":
+        response += f"\n\n{poke.display_name} is ready to evolve! Use /evolve to evolve it."
+
+    await message.answer(response)
+
+
+async def _resolve_use_target(
+    session: AsyncSession, user: User, pokemon_idx: int | None
+) -> Pokemon | None:
+    """Resolve a Pokemon target by index or selected Pokemon."""
+    if pokemon_idx is not None:
+        # Get by index
+        poke_result = await session.execute(
+            select(Pokemon)
+            .where(Pokemon.owner_id == user.telegram_id)
+            .order_by(Pokemon.caught_at.desc())
+        )
+        pokemon_list = list(poke_result.scalars().all())
+
+        if pokemon_idx < 1 or pokemon_idx > len(pokemon_list):
+            return None
+        return pokemon_list[pokemon_idx - 1]
+
+    # Use selected Pokemon
+    if user.selected_pokemon_id:
+        sel_result = await session.execute(
+            select(Pokemon)
+            .where(Pokemon.id == user.selected_pokemon_id)
+            .where(Pokemon.owner_id == user.telegram_id)
+        )
+        return sel_result.scalar_one_or_none()
+
+    return None
