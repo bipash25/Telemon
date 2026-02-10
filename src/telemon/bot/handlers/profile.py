@@ -10,8 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from telemon.config import settings
 from telemon.database.models import PokedexEntry, Pokemon, User
+from telemon.logging import get_logger
 
 router = Router(name="profile")
+logger = get_logger(__name__)
 
 
 @router.message(Command("profile"))
@@ -151,4 +153,131 @@ async def cmd_daily(message: Message, session: AsyncSession, user: User) -> None
         f"Total: <b>+{total_reward}</b> Telecoins\n\n"
         f"New balance: {user.balance:,} Telecoins\n"
         f"Current streak: {user.daily_streak} days{friendship_text}{daily_quest_msg}"
+    )
+
+
+@router.message(Command("gift", "give", "send"))
+async def cmd_gift(message: Message, session: AsyncSession, user: User) -> None:
+    """Handle /gift command to send Telecoins to another user."""
+    if not message.text:
+        return
+
+    args = message.text.split()
+
+    if len(args) < 3:
+        await message.answer(
+            "<b>Gift Telecoins</b>\n\n"
+            "Usage: /gift @username [amount]\n"
+            "Example: /gift @friend 500\n\n"
+            "You can also reply to a user's message:\n"
+            "/gift [amount]"
+        )
+        return
+
+    # Parse amount and recipient
+    amount = None
+    target_user = None
+
+    # Check if replying to someone
+    if message.reply_to_message and message.reply_to_message.from_user:
+        target_telegram_id = message.reply_to_message.from_user.id
+        target_name = message.reply_to_message.from_user.first_name or "Unknown"
+        # Amount is the second arg when replying
+        try:
+            amount = int(args[1])
+        except ValueError:
+            await message.answer("Invalid amount! Use a number.\nExample: /gift 500")
+            return
+    else:
+        # Parse @username or user ID
+        target_ref = args[1]
+
+        # Try to parse amount
+        try:
+            amount = int(args[2])
+        except ValueError:
+            await message.answer("Invalid amount! Use a number.\nExample: /gift @friend 500")
+            return
+
+        # Resolve target user
+        if target_ref.startswith("@"):
+            username = target_ref[1:]
+            result = await session.execute(
+                select(User).where(User.username == username)
+            )
+            target_user = result.scalar_one_or_none()
+            if not target_user:
+                await message.answer(
+                    f"User @{username} not found.\n"
+                    "They need to use /start first!"
+                )
+                return
+            target_telegram_id = target_user.telegram_id
+            target_name = target_user.display_name
+        elif target_ref.isdigit():
+            target_telegram_id = int(target_ref)
+            result = await session.execute(
+                select(User).where(User.telegram_id == target_telegram_id)
+            )
+            target_user = result.scalar_one_or_none()
+            if not target_user:
+                await message.answer("User not found!")
+                return
+            target_name = target_user.display_name
+        else:
+            await message.answer(
+                "Invalid user! Use @username or reply to their message.\n"
+                "Example: /gift @friend 500"
+            )
+            return
+
+    # Validate amount
+    if amount is None or amount < 1:
+        await message.answer("Amount must be at least 1 TC!")
+        return
+
+    if amount > 1_000_000:
+        await message.answer("Maximum gift amount is 1,000,000 TC!")
+        return
+
+    # Can't gift yourself
+    if not target_user:
+        result = await session.execute(
+            select(User).where(User.telegram_id == target_telegram_id)
+        )
+        target_user = result.scalar_one_or_none()
+        if not target_user:
+            await message.answer("User not found! They need to use /start first.")
+            return
+        target_name = target_user.display_name
+
+    if target_user.telegram_id == user.telegram_id:
+        await message.answer("You can't gift yourself!")
+        return
+
+    # Check balance
+    if user.balance < amount:
+        await message.answer(
+            f"Not enough Telecoins!\n"
+            f"Your balance: {user.balance:,} TC\n"
+            f"Trying to send: {amount:,} TC"
+        )
+        return
+
+    # Transfer
+    user.balance -= amount
+    target_user.balance += amount
+    await session.commit()
+
+    logger.info(
+        "User sent gift",
+        from_user=user.telegram_id,
+        to_user=target_user.telegram_id,
+        amount=amount,
+    )
+
+    await message.answer(
+        f"<b>Gift Sent!</b>\n\n"
+        f"You sent <b>{amount:,} TC</b> to {target_name}!\n\n"
+        f"Your balance: {user.balance:,} TC"
     )
