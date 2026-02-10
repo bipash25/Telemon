@@ -74,6 +74,10 @@ HELP_MESSAGE = """
 /lb catches/wealth/pokedex/shiny/battles/rating
 /rank - Your ranking
 
+<b>Achievements</b>
+/achievements - View your achievement progress
+/badges - Same as /achievements
+
 <b>Admin</b> (Group admins only)
 /settings - Group settings
 /spawn - Force a spawn
@@ -248,6 +252,25 @@ Deposit a Pokemon and receive a random one from another trainer!
 - 1 Pokemon in the pool at a time
 - Favorites & selected Pokemon can't be traded
 - 5 minute cooldown between trades
+""",
+    "achievements": """
+<b>/achievements</b>
+Also: /badges, /ach
+
+View your achievement progress across all categories.
+
+<b>Categories:</b>
+Catching — Catch milestones (1, 10, 50, 100, 500, 1000)
+Shiny — Shiny catch milestones (1, 10, 50)
+Pokedex — Species registration milestones (10, 50, 151, 500, 1025)
+Evolution — Evolution milestones (1, 10, 50)
+Battle — Battle win milestones (1, 10, 50, 100)
+Trading — Trade milestones (1, 10, 50)
+Daily Streak — Streak milestones (3, 7, 14, 30 days)
+Special — Perfect IV, Legendary, Mythical catches
+Wonder Trade — Wonder Trade milestones (10)
+
+Each achievement grants a TC reward when unlocked.
 """,
 }
 

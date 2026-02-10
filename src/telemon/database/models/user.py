@@ -41,6 +41,10 @@ class User(Base, TimestampMixin):
     battle_losses: Mapped[int] = mapped_column(Integer, default=0)
     battle_rating: Mapped[int] = mapped_column(Integer, default=1000)
 
+    # Achievement tracking counters
+    total_evolutions: Mapped[int] = mapped_column(Integer, default=0)
+    total_trades: Mapped[int] = mapped_column(Integer, default=0)
+
     # User settings (JSON)
     settings: Mapped[dict] = mapped_column(JSONB, default=dict)
 

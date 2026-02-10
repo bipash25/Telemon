@@ -423,6 +423,21 @@ async def callback_execute_move(
         
         await session.commit()
         
+        # Quest progress for battle win (was missing)
+        from telemon.core.quests import update_quest_progress
+        battle_quest_completed = await update_quest_progress(session, move_result["winner_id"], "battle_win")
+        if battle_quest_completed:
+            await session.commit()
+            for q in battle_quest_completed:
+                lines.append(f"📋 Quest complete: {q.description} (+{q.reward_coins:,} TC)")
+
+        # Achievement hooks for battle win
+        from telemon.core.achievements import check_achievements, format_achievement_notification
+        battle_achs = await check_achievements(session, move_result["winner_id"], "battle_win")
+        if battle_achs:
+            await session.commit()
+            lines.append(format_achievement_notification(battle_achs))
+
         winner_name = winner.username or f"User {winner.telegram_id}"
         
         lines.extend([

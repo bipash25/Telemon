@@ -659,10 +659,18 @@ async def cmd_evolve(message: Message, session: AsyncSession, user: User) -> Non
                 for q in completed:
                     quest_text += f"\n📋 Quest complete: {q.description} (+{q.reward_coins:,} TC)"
             
+            # Achievement hooks
+            user.total_evolutions += 1
+            from telemon.core.achievements import check_achievements, format_achievement_notification
+            new_achs = await check_achievements(session, user.telegram_id, "evolve")
+            ach_text = format_achievement_notification(new_achs)
+            if new_achs:
+                await session.commit()
+
             await message.answer(
                 f"<b>Congratulations!</b>\n\n"
                 f"{message_text}\n\n"
-                f"Your Pokemon is now a <b>{poke.species.name}</b>!{quest_text}"
+                f"Your Pokemon is now a <b>{poke.species.name}</b>!{quest_text}{ach_text}"
             )
             
             logger.info(

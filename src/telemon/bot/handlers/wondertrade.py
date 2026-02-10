@@ -231,6 +231,32 @@ async def do_wonder_trade(
 
         await session.commit()
 
+        # Update quest progress
+        from telemon.core.quests import update_quest_progress
+        await update_quest_progress(session, user.telegram_id, "trade")
+        await update_quest_progress(session, old_owner_id, "trade")
+
+        # Increment trade counters
+        user.total_trades += 1
+        # Also increment for the other user
+        from telemon.database.models import User as UserModel
+        other_user_result = await session.execute(
+            select(UserModel).where(UserModel.telegram_id == old_owner_id)
+        )
+        other_user = other_user_result.scalar_one_or_none()
+        if other_user:
+            other_user.total_trades += 1
+
+        # Achievement hooks
+        from telemon.core.achievements import check_achievements, format_achievement_notification
+        wt_achs = await check_achievements(session, user.telegram_id, "wonder_trade")
+        wt_achs.extend(await check_achievements(session, user.telegram_id, "trade"))
+        wt_achs.extend(await check_achievements(session, old_owner_id, "wonder_trade"))
+        wt_achs.extend(await check_achievements(session, old_owner_id, "trade"))
+        await session.commit()
+
+        wt_ach_text = format_achievement_notification(wt_achs)
+
         # Build response for the depositor
         received = match_pokemon
         shiny_sent = " ✨" if poke.is_shiny else ""
@@ -242,13 +268,8 @@ async def do_wonder_trade(
             f"<b>Received:</b> {received.species.name}{shiny_recv} (Lv.{received.level})\n"
             f"IV: {received.iv_percentage:.1f}% | Nature: {received.nature.title()}\n\n"
             f"<i>The other trainer sent you their {received.species.name}!</i>"
+            f"{wt_ach_text}"
         )
-
-        # Update quest progress
-        from telemon.core.quests import update_quest_progress
-        await update_quest_progress(session, user.telegram_id, "trade")
-        await update_quest_progress(session, old_owner_id, "trade")
-        await session.commit()
 
         logger.info(
             "Wonder Trade matched",

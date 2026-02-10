@@ -31,6 +31,7 @@ from telemon.database.models.pokedex import PokedexEntry
 from telemon.database.models.spawn_admin import SpawnAdmin
 from telemon.database.models.quest import UserQuest
 from telemon.database.models.wondertrade import WonderTrade
+from telemon.database.models.achievement import UserAchievement
 
 # Alembic Config object
 config = context.config

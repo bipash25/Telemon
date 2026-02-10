@@ -3,6 +3,7 @@
 from aiogram import Dispatcher
 
 from telemon.bot.handlers import (
+    achievements,
     admin,
     battle,
     catch,
@@ -49,6 +50,9 @@ def register_all_handlers(dp: Dispatcher) -> None:
 
     # Wonder Trade
     dp.include_router(wondertrade.router)
+
+    # Achievements
+    dp.include_router(achievements.router)
 
     # Admin handlers
     dp.include_router(admin.router)

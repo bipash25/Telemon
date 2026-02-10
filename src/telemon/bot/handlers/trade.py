@@ -577,6 +577,10 @@ async def execute_trade(message: Message, session: AsyncSession, trade: Trade) -
     trade.status = TradeStatus.COMPLETED
     trade.completed_at = datetime.utcnow()
 
+    # Increment trade counters
+    user1.total_trades += 1
+    user2.total_trades += 1
+
     # Create history record
     history = TradeHistory(
         trade_id=trade.id,
@@ -644,6 +648,20 @@ async def execute_trade(message: Message, session: AsyncSession, trade: Trade) -
 
     if evolution_messages:
         response += "\n" + "\n".join(evolution_messages)
+
+    # Quest progress for trade (was missing for direct trades)
+    from telemon.core.quests import update_quest_progress
+    await update_quest_progress(session, trade.user1_id, "trade")
+    await update_quest_progress(session, trade.user2_id, "trade")
+
+    # Achievement hooks for trade
+    from telemon.core.achievements import check_achievements, format_achievement_notification
+    trade_achs_1 = await check_achievements(session, trade.user1_id, "trade")
+    trade_achs_2 = await check_achievements(session, trade.user2_id, "trade")
+    all_trade_achs = trade_achs_1 + trade_achs_2
+    if all_trade_achs:
+        await session.commit()
+        response += format_achievement_notification(all_trade_achs)
 
     await message.answer(response)
 

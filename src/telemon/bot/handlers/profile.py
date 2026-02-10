@@ -143,6 +143,13 @@ async def cmd_daily(message: Message, session: AsyncSession, user: User) -> None
         for q in completed:
             daily_quest_msg += f"\n📋 Quest complete: {q.description} (+{q.reward_coins:,} TC)"
 
+    # Achievement hooks for daily streak
+    from telemon.core.achievements import check_achievements, format_achievement_notification
+    daily_achs = await check_achievements(session, user.telegram_id, "daily")
+    daily_ach_text = format_achievement_notification(daily_achs)
+    if daily_achs:
+        await session.commit()
+
     streak_text = ""
     if streak > 0:
         streak_text = f"\nStreak bonus: +{streak_bonus} ({streak} days)"
@@ -152,7 +159,7 @@ async def cmd_daily(message: Message, session: AsyncSession, user: User) -> None
         f"+{base_reward} Telecoins{streak_text}\n"
         f"Total: <b>+{total_reward}</b> Telecoins\n\n"
         f"New balance: {user.balance:,} Telecoins\n"
-        f"Current streak: {user.daily_streak} days{friendship_text}{daily_quest_msg}"
+        f"Current streak: {user.daily_streak} days{friendship_text}{daily_quest_msg}{daily_ach_text}"
     )
 
 

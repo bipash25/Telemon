@@ -313,6 +313,28 @@ async def cmd_catch(message: Message, session: AsyncSession, user: User) -> None
     if quest_msg:
         msg_lines.append(quest_msg)
 
+    # Achievement checks
+    from telemon.core.achievements import check_achievements, format_achievement_notification
+
+    ach_events = ["catch"]
+    if spawn.is_shiny:
+        ach_events.append("catch_shiny")
+    if iv_percent >= 100.0:
+        ach_events.append("catch_perfect")
+    if spawn.species.is_legendary:
+        ach_events.append("catch_legendary")
+    if spawn.species.is_mythical:
+        ach_events.append("catch_mythical")
+    if is_new_pokedex_entry:
+        ach_events.append("pokedex_update")
+
+    all_new_achievements = []
+    for ev in ach_events:
+        all_new_achievements.extend(await check_achievements(session, user.telegram_id, ev))
+    if all_new_achievements:
+        await session.commit()
+        msg_lines.append(format_achievement_notification(all_new_achievements))
+
     await message.answer("\n".join(msg_lines))
 
 
