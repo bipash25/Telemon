@@ -12,6 +12,7 @@ from telemon.bot.handlers import (
     pokedex,
     pokemon,
     profile,
+    quests,
     shinyhunt,
     shop,
     spawn,
@@ -41,6 +42,9 @@ def register_all_handlers(dp: Dispatcher) -> None:
     dp.include_router(trade.router)
     dp.include_router(market.router)
     dp.include_router(shop.router)
+
+    # Quest handlers
+    dp.include_router(quests.router)
 
     # Admin handlers
     dp.include_router(admin.router)

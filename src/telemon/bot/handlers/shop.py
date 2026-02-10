@@ -406,6 +406,11 @@ async def cmd_use(message: Message, session: AsyncSession, user: User) -> None:
             new_level=poke.level,
         )
 
+        # Update quest progress for item usage
+        from telemon.core.quests import update_quest_progress
+        await update_quest_progress(session, user.telegram_id, "use_item")
+        await session.commit()
+
         # Check if can evolve now
         evo_result = await check_evolution(session, poke, user.telegram_id)
         if evo_result.can_evolve and evo_result.trigger == "level":
@@ -520,6 +525,15 @@ async def cmd_pet(message: Message, session: AsyncSession, user: User) -> None:
         f"Friendship: {poke.friendship}/255 (+{actual_gain}{bell_text})\n"
         f"{hearts}"
     )
+
+    # Update quest progress
+    from telemon.core.quests import update_quest_progress
+
+    completed = await update_quest_progress(session, user.telegram_id, "pet")
+    if completed:
+        await session.commit()
+        for q in completed:
+            response += f"\n📋 Quest complete: {q.description} (+{q.reward_coins:,} TC)"
 
     # Check if can evolve with friendship now
     evo_result = await check_evolution(session, poke, user.telegram_id)

@@ -131,6 +131,16 @@ async def cmd_daily(message: Message, session: AsyncSession, user: User) -> None
 
     await session.commit()
 
+    # Update quest progress for daily claim
+    from telemon.core.quests import update_quest_progress
+
+    daily_quest_msg = ""
+    completed = await update_quest_progress(session, user.telegram_id, "daily_claim")
+    if completed:
+        await session.commit()
+        for q in completed:
+            daily_quest_msg += f"\n📋 Quest complete: {q.description} (+{q.reward_coins:,} TC)"
+
     streak_text = ""
     if streak > 0:
         streak_text = f"\nStreak bonus: +{streak_bonus} ({streak} days)"
@@ -140,5 +150,5 @@ async def cmd_daily(message: Message, session: AsyncSession, user: User) -> None
         f"+{base_reward} Telecoins{streak_text}\n"
         f"Total: <b>+{total_reward}</b> Telecoins\n\n"
         f"New balance: {user.balance:,} Telecoins\n"
-        f"Current streak: {user.daily_streak} days{friendship_text}"
+        f"Current streak: {user.daily_streak} days{friendship_text}{daily_quest_msg}"
     )

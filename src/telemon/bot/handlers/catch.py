@@ -248,6 +248,26 @@ async def cmd_catch(message: Message, session: AsyncSession, user: User) -> None
     session.add(new_pokemon)
     await session.commit()
 
+    # Update quest progress
+    from telemon.core.quests import update_quest_progress
+
+    quest_msg = ""
+    # Generic catch quest
+    completed = await update_quest_progress(session, user.telegram_id, "catch")
+    # Type-specific catch quest
+    for ptype in spawn.species.types:
+        completed += await update_quest_progress(
+            session, user.telegram_id, "catch_type", params={"type": ptype.lower()}
+        )
+    # Shiny catch quest
+    if spawn.is_shiny:
+        completed += await update_quest_progress(session, user.telegram_id, "catch_shiny")
+    if completed:
+        await session.commit()
+        quest_msg = "\n📋 Quest progress updated!"
+        for q in completed:
+            quest_msg += f"\n  🎉 Quest complete: {q.description} (+{q.reward_coins:,} TC)"
+
     # Build response message
     shiny_text = " ✨ SHINY" if spawn.is_shiny else ""
     iv_total = sum(ivs.values())
@@ -288,6 +308,10 @@ async def cmd_catch(message: Message, session: AsyncSession, user: User) -> None
     # Shiny chain message
     if chain_msg:
         msg_lines.append(chain_msg)
+
+    # Quest progress
+    if quest_msg:
+        msg_lines.append(quest_msg)
 
     await message.answer("\n".join(msg_lines))
 

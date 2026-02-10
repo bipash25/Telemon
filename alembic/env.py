@@ -28,6 +28,8 @@ from telemon.database.models.trade import Trade, TradeHistory
 from telemon.database.models.market import MarketListing
 from telemon.database.models.battle import Battle
 from telemon.database.models.pokedex import PokedexEntry
+from telemon.database.models.spawn_admin import SpawnAdmin
+from telemon.database.models.quest import UserQuest
 
 # Alembic Config object
 config = context.config

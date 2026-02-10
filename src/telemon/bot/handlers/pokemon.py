@@ -649,11 +649,20 @@ async def cmd_evolve(message: Message, session: AsyncSession, user: User) -> Non
         if success:
             # Refresh the Pokemon data
             await session.refresh(poke)
+
+            # Update quest progress
+            from telemon.core.quests import update_quest_progress
+            completed = await update_quest_progress(session, user.telegram_id, "evolve")
+            quest_text = ""
+            if completed:
+                await session.commit()
+                for q in completed:
+                    quest_text += f"\n📋 Quest complete: {q.description} (+{q.reward_coins:,} TC)"
             
             await message.answer(
                 f"<b>Congratulations!</b>\n\n"
                 f"{message_text}\n\n"
-                f"Your Pokemon is now a <b>{poke.species.name}</b>!"
+                f"Your Pokemon is now a <b>{poke.species.name}</b>!{quest_text}"
             )
             
             logger.info(
