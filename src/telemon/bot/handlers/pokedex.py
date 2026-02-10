@@ -18,51 +18,177 @@ logger = get_logger(__name__)
 
 # Constants
 ENTRIES_PER_PAGE = 10
-TOTAL_GEN1_POKEMON = 151
+
+# Generation names for display
+GEN_NAMES = {
+    1: "Kanto",
+    2: "Johto",
+    3: "Hoenn",
+    4: "Sinnoh",
+    5: "Unova",
+    6: "Kalos",
+    7: "Alola",
+    8: "Galar",
+    9: "Paldea",
+}
 
 
-async def get_pokedex_stats(session: AsyncSession, user_id: int) -> dict:
-    """Get pokedex completion statistics for a user."""
-    # Count seen
-    seen_result = await session.execute(
-        select(func.count(PokedexEntry.species_id))
-        .where(PokedexEntry.user_id == user_id)
-        .where(PokedexEntry.seen == True)
+def parse_pokedex_args(text: str) -> dict:
+    """Parse arguments from pokedex command.
+
+    Supports:
+      /pokedex gen:3
+      /pokedex list gen:3
+      /pokedex caught gen:1
+      /pokedex --gen 3
+    """
+    args = {
+        "subcommand": None,
+        "gen": None,
+        "page": 1,
+        "query": None,
+    }
+
+    if not text:
+        return args
+
+    parts = text.split()
+    i = 0
+    positional_args = []
+
+    while i < len(parts):
+        part = parts[i].lower()
+
+        # Key:value style
+        if ":" in part:
+            key, _, value = part.partition(":")
+            if key in ("gen", "g", "generation") and value.isdigit():
+                gen = int(value)
+                if 1 <= gen <= 9:
+                    args["gen"] = gen
+            elif key in ("page", "p") and value.isdigit():
+                args["page"] = max(1, int(value))
+        # --gen N style
+        elif part in ("--gen", "--generation"):
+            if i + 1 < len(parts) and parts[i + 1].isdigit():
+                gen = int(parts[i + 1])
+                if 1 <= gen <= 9:
+                    args["gen"] = gen
+                i += 1
+        # Plain page number
+        elif part.isdigit():
+            num = int(part)
+            if 1 <= num <= 9 and args["gen"] is None and args["subcommand"] is None:
+                # Ambiguous — could be gen or page. Treat as page.
+                args["page"] = num
+            else:
+                args["page"] = max(1, num)
+        else:
+            positional_args.append(part)
+
+        i += 1
+
+    # First positional arg is the subcommand
+    if positional_args:
+        args["subcommand"] = positional_args[0]
+        if len(positional_args) > 1:
+            args["query"] = " ".join(positional_args[1:])
+
+    return args
+
+
+async def get_total_pokemon_count(session: AsyncSession, gen: int | None = None) -> int:
+    """Get total Pokemon count, optionally filtered by generation."""
+    query = select(func.count(PokemonSpecies.national_dex))
+    if gen is not None:
+        query = query.where(PokemonSpecies.generation == gen)
+    result = await session.execute(query)
+    return result.scalar() or 0
+
+
+async def get_gen_counts(session: AsyncSession) -> dict[int, int]:
+    """Get Pokemon count per generation."""
+    result = await session.execute(
+        select(PokemonSpecies.generation, func.count(PokemonSpecies.national_dex))
+        .group_by(PokemonSpecies.generation)
+        .order_by(PokemonSpecies.generation)
     )
+    return dict(result.all())
+
+
+async def get_pokedex_stats(
+    session: AsyncSession, user_id: int, gen: int | None = None
+) -> dict:
+    """Get pokedex completion statistics for a user, optionally by generation."""
+    # Get species IDs in this gen (if filtered)
+    gen_filter = None
+    if gen is not None:
+        gen_species = await session.execute(
+            select(PokemonSpecies.national_dex)
+            .where(PokemonSpecies.generation == gen)
+        )
+        gen_filter = [s for s in gen_species.scalars().all()]
+
+    def apply_gen_filter(query):
+        if gen_filter is not None:
+            return query.where(PokedexEntry.species_id.in_(gen_filter))
+        return query
+
+    # Count seen
+    seen_q = select(func.count(PokedexEntry.species_id)).where(
+        PokedexEntry.user_id == user_id,
+        PokedexEntry.seen == True,
+    )
+    seen_result = await session.execute(apply_gen_filter(seen_q))
     seen_count = seen_result.scalar() or 0
 
     # Count caught
-    caught_result = await session.execute(
-        select(func.count(PokedexEntry.species_id))
-        .where(PokedexEntry.user_id == user_id)
-        .where(PokedexEntry.caught == True)
+    caught_q = select(func.count(PokedexEntry.species_id)).where(
+        PokedexEntry.user_id == user_id,
+        PokedexEntry.caught == True,
     )
+    caught_result = await session.execute(apply_gen_filter(caught_q))
     caught_count = caught_result.scalar() or 0
 
     # Count shiny caught
-    shiny_result = await session.execute(
-        select(func.count(PokedexEntry.species_id))
-        .where(PokedexEntry.user_id == user_id)
-        .where(PokedexEntry.caught_shiny == True)
+    shiny_q = select(func.count(PokedexEntry.species_id)).where(
+        PokedexEntry.user_id == user_id,
+        PokedexEntry.caught_shiny == True,
     )
+    shiny_result = await session.execute(apply_gen_filter(shiny_q))
     shiny_count = shiny_result.scalar() or 0
 
     # Total catches (sum of times_caught)
-    total_catches_result = await session.execute(
-        select(func.sum(PokedexEntry.times_caught))
-        .where(PokedexEntry.user_id == user_id)
+    total_q = select(func.sum(PokedexEntry.times_caught)).where(
+        PokedexEntry.user_id == user_id,
     )
+    total_catches_result = await session.execute(apply_gen_filter(total_q))
     total_catches = total_catches_result.scalar() or 0
+
+    # Total pokemon in scope
+    total_pokemon = await get_total_pokemon_count(session, gen)
 
     return {
         "seen": seen_count,
         "caught": caught_count,
         "shiny": shiny_count,
         "total_catches": total_catches,
-        "total_pokemon": TOTAL_GEN1_POKEMON,
-        "seen_percent": round((seen_count / TOTAL_GEN1_POKEMON) * 100, 1),
-        "caught_percent": round((caught_count / TOTAL_GEN1_POKEMON) * 100, 1),
+        "total_pokemon": total_pokemon,
+        "seen_percent": round((seen_count / total_pokemon) * 100, 1) if total_pokemon else 0,
+        "caught_percent": round((caught_count / total_pokemon) * 100, 1) if total_pokemon else 0,
     }
+
+
+async def get_caught_per_gen(session: AsyncSession, user_id: int) -> dict[int, int]:
+    """Get number of caught unique species per generation."""
+    result = await session.execute(
+        select(PokemonSpecies.generation, func.count(PokedexEntry.species_id))
+        .join(PokemonSpecies, PokemonSpecies.national_dex == PokedexEntry.species_id)
+        .where(PokedexEntry.user_id == user_id, PokedexEntry.caught == True)
+        .group_by(PokemonSpecies.generation)
+        .order_by(PokemonSpecies.generation)
+    )
+    return dict(result.all())
 
 
 async def get_pokedex_entries(
@@ -70,12 +196,15 @@ async def get_pokedex_entries(
     user_id: int,
     page: int = 1,
     filter_type: str = "all",  # all, caught, missing, shiny, seen
+    gen: int | None = None,
 ) -> tuple[list[dict], int]:
     """Get pokedex entries with filters."""
-    # Get all species
-    species_result = await session.execute(
-        select(PokemonSpecies).order_by(PokemonSpecies.national_dex)
-    )
+    # Get all species (filtered by gen if specified)
+    species_q = select(PokemonSpecies).order_by(PokemonSpecies.national_dex)
+    if gen is not None:
+        species_q = species_q.where(PokemonSpecies.generation == gen)
+
+    species_result = await session.execute(species_q)
     all_species = list(species_result.scalars().all())
 
     # Get user's pokedex entries
@@ -98,6 +227,7 @@ async def get_pokedex_entries(
             "name": species.name,
             "type1": species.type1,
             "type2": species.type2,
+            "generation": species.generation,
             "seen": seen,
             "caught": caught,
             "caught_shiny": caught_shiny,
@@ -156,36 +286,35 @@ async def get_species_by_name_or_number(
 
 
 def build_pokedex_keyboard(
-    page: int, total_pages: int, filter_type: str = "all"
+    page: int, total_pages: int, filter_type: str = "all", gen: int | None = None
 ) -> InlineKeyboardBuilder:
     """Build pagination keyboard for pokedex."""
     builder = InlineKeyboardBuilder()
+    gen_str = str(gen) if gen else "0"
 
     # Pagination row
     if total_pages > 1:
         nav_buttons = []
         if page > 1:
-            nav_buttons.append(("◀️", f"dex:page:{page - 1}:{filter_type}"))
+            nav_buttons.append(("◀️", f"dex:page:{page - 1}:{filter_type}:{gen_str}"))
         nav_buttons.append((f"{page}/{total_pages}", "dex:noop"))
         if page < total_pages:
-            nav_buttons.append(("▶️", f"dex:page:{page + 1}:{filter_type}"))
+            nav_buttons.append(("▶️", f"dex:page:{page + 1}:{filter_type}:{gen_str}"))
 
         for text, callback_data in nav_buttons:
             builder.button(text=text, callback_data=callback_data)
 
     # Filter row
     filter_buttons = [
-        ("📖 All", "dex:filter:all:1"),
-        ("✅ Caught", "dex:filter:caught:1"),
-        ("❌ Missing", "dex:filter:missing:1"),
-        ("✨ Shiny", "dex:filter:shiny:1"),
+        ("All", "all"),
+        ("Caught", "caught"),
+        ("Missing", "missing"),
+        ("Shiny", "shiny"),
     ]
 
-    for text, callback_data in filter_buttons:
-        # Highlight active filter
-        if filter_type in callback_data:
-            text = f"[{text}]"
-        builder.button(text=text, callback_data=callback_data)
+    for text, ftype in filter_buttons:
+        display = f"[{text}]" if filter_type == ftype else text
+        builder.button(text=display, callback_data=f"dex:filter:{ftype}:1:{gen_str}")
 
     builder.adjust(3, 4)  # 3 nav buttons, 4 filter buttons
 
@@ -235,54 +364,104 @@ def generate_progress_bar(percent: float, width: int = 10) -> str:
 async def cmd_pokedex(message: Message, session: AsyncSession, user: User) -> None:
     """Handle /pokedex command and subcommands."""
     text = message.text or ""
-    args = text.split()
+    # Strip command prefix
+    if text.startswith("/pokedex"):
+        raw = text[len("/pokedex"):].strip()
+    elif text.startswith("/dex"):
+        raw = text[len("/dex"):].strip()
+    else:
+        raw = ""
 
-    if len(args) < 2:
-        # Show overview
-        await show_pokedex_overview(message, session, user)
+    args = parse_pokedex_args(raw)
+    sub = args["subcommand"]
+    gen = args["gen"]
+
+    if sub is None:
+        await show_pokedex_overview(message, session, user, gen=gen)
         return
 
-    subcommand = args[1].lower()
-
-    if subcommand in ["list", "all"]:
-        await show_pokedex_list(message, session, user, filter_type="all")
-    elif subcommand in ["caught", "owned"]:
-        await show_pokedex_list(message, session, user, filter_type="caught")
-    elif subcommand in ["missing", "uncaught", "needed"]:
-        await show_pokedex_list(message, session, user, filter_type="missing")
-    elif subcommand in ["shiny", "shinies"]:
-        await show_pokedex_list(message, session, user, filter_type="shiny")
-    elif subcommand in ["seen"]:
-        await show_pokedex_list(message, session, user, filter_type="seen")
-    elif subcommand in ["search", "find"]:
-        if len(args) > 2:
-            await pokedex_search(message, session, user, " ".join(args[2:]))
+    if sub in ("list", "all"):
+        await show_pokedex_list(message, session, user, filter_type="all", page=args["page"], gen=gen)
+    elif sub in ("caught", "owned"):
+        await show_pokedex_list(message, session, user, filter_type="caught", page=args["page"], gen=gen)
+    elif sub in ("missing", "uncaught", "needed"):
+        await show_pokedex_list(message, session, user, filter_type="missing", page=args["page"], gen=gen)
+    elif sub in ("shiny", "shinies"):
+        await show_pokedex_list(message, session, user, filter_type="shiny", page=args["page"], gen=gen)
+    elif sub in ("seen",):
+        await show_pokedex_list(message, session, user, filter_type="seen", page=args["page"], gen=gen)
+    elif sub in ("search", "find"):
+        query = args["query"]
+        if query:
+            await pokedex_search(message, session, user, query)
         else:
             await message.answer("Usage: /pokedex search [name or number]")
-    elif subcommand == "help":
+    elif sub == "help":
         await pokedex_help(message)
     else:
         # Try to look up by name or number
-        await pokedex_search(message, session, user, subcommand)
+        await pokedex_search(message, session, user, sub)
 
 
 async def show_pokedex_overview(
-    message: Message, session: AsyncSession, user: User
+    message: Message, session: AsyncSession, user: User, gen: int | None = None
 ) -> None:
     """Show pokedex completion overview."""
-    stats = await get_pokedex_stats(session, user.telegram_id)
+    stats = await get_pokedex_stats(session, user.telegram_id, gen=gen)
 
     caught_bar = generate_progress_bar(stats["caught_percent"])
     seen_bar = generate_progress_bar(stats["seen_percent"])
 
+    # Title
+    if gen:
+        gen_name = GEN_NAMES.get(gen, f"Gen {gen}")
+        title = f"📕 <b>{user.display_name}'s Pokédex — Gen {gen} ({gen_name})</b>"
+    else:
+        title = f"📕 <b>{user.display_name}'s Pokédex</b>"
+
+    lines = [
+        title,
+        "",
+        f"<b>Caught:</b> {stats['caught']}/{stats['total_pokemon']} ({stats['caught_percent']}%)",
+        f"[{caught_bar}]",
+        "",
+        f"<b>Seen:</b> {stats['seen']}/{stats['total_pokemon']} ({stats['seen_percent']}%)",
+        f"[{seen_bar}]",
+        "",
+        f"✨ <b>Shinies:</b> {stats['shiny']}",
+        f"🎯 <b>Total Catches:</b> {stats['total_catches']}",
+    ]
+
+    # Per-generation breakdown (only in full overview)
+    if gen is None:
+        gen_counts = await get_gen_counts(session)
+        caught_per_gen = await get_caught_per_gen(session, user.telegram_id)
+
+        lines.append("")
+        lines.append("<b>By Generation:</b>")
+        for g in sorted(gen_counts.keys()):
+            total = gen_counts[g]
+            caught = caught_per_gen.get(g, 0)
+            pct = round((caught / total) * 100) if total else 0
+            region = GEN_NAMES.get(g, "???")
+            bar = generate_progress_bar(pct, width=6)
+            lines.append(f"  Gen {g} ({region}): {caught}/{total} [{bar}] {pct}%")
+
     # Recent catches
-    recent_result = await session.execute(
+    recent_q = (
         select(PokedexEntry)
-        .where(PokedexEntry.user_id == user.telegram_id)
-        .where(PokedexEntry.caught == True)
+        .where(PokedexEntry.user_id == user.telegram_id, PokedexEntry.caught == True)
         .order_by(PokedexEntry.first_caught_at.desc())
         .limit(5)
     )
+    if gen is not None:
+        gen_species = await session.execute(
+            select(PokemonSpecies.national_dex).where(PokemonSpecies.generation == gen)
+        )
+        gen_ids = [s for s in gen_species.scalars().all()]
+        recent_q = recent_q.where(PokedexEntry.species_id.in_(gen_ids))
+
+    recent_result = await session.execute(recent_q)
     recent_entries = list(recent_result.scalars().all())
 
     recent_lines = []
@@ -292,21 +471,20 @@ async def show_pokedex_overview(
 
     recent_text = "\n".join(recent_lines) if recent_lines else "  <i>None yet!</i>"
 
-    await message.answer(
-        f"📕 <b>{user.display_name}'s Pokédex</b>\n\n"
-        f"<b>Caught:</b> {stats['caught']}/{stats['total_pokemon']} ({stats['caught_percent']}%)\n"
-        f"[{caught_bar}]\n\n"
-        f"<b>Seen:</b> {stats['seen']}/{stats['total_pokemon']} ({stats['seen_percent']}%)\n"
-        f"[{seen_bar}]\n\n"
-        f"✨ <b>Shinies:</b> {stats['shiny']}\n"
-        f"🎯 <b>Total Catches:</b> {stats['total_catches']}\n\n"
-        f"<b>Recent Catches:</b>\n{recent_text}\n\n"
-        f"<b>Commands:</b>\n"
-        f"/pokedex list - Browse all entries\n"
-        f"/pokedex caught - View caught Pokemon\n"
-        f"/pokedex missing - View uncaught Pokemon\n"
-        f"/pokedex [name/#] - Look up Pokemon"
-    )
+    lines.append("")
+    lines.append(f"<b>Recent Catches:</b>\n{recent_text}")
+    lines.append("")
+    lines.append("<b>Commands:</b>")
+    lines.append("/pokedex list - Browse all entries")
+    lines.append("/pokedex caught - View caught Pokemon")
+    lines.append("/pokedex missing - View uncaught Pokemon")
+    lines.append("/pokedex [name/#] - Look up Pokemon")
+    if gen is None:
+        lines.append("/pokedex gen:N - Filter by generation (1-9)")
+    else:
+        lines.append(f"/pokedex list gen:{gen} - Browse Gen {gen}")
+
+    await message.answer("\n".join(lines))
 
 
 async def show_pokedex_list(
@@ -315,10 +493,11 @@ async def show_pokedex_list(
     user: User,
     filter_type: str = "all",
     page: int = 1,
+    gen: int | None = None,
 ) -> None:
     """Show paginated pokedex list."""
     entries, total_count = await get_pokedex_entries(
-        session, user.telegram_id, page=page, filter_type=filter_type
+        session, user.telegram_id, page=page, filter_type=filter_type, gen=gen
     )
 
     if not entries:
@@ -329,15 +508,25 @@ async def show_pokedex_list(
             "shiny": "shiny Pokemon",
             "seen": "seen (but uncaught) Pokemon",
         }
+        gen_text = f" in Gen {gen}" if gen else ""
         await message.answer(
             f"📕 <b>Pokédex</b>\n\n"
-            f"No {filter_names.get(filter_type, 'entries')} found!"
+            f"No {filter_names.get(filter_type, 'entries')}{gen_text} found!"
         )
         return
 
     total_pages = math.ceil(total_count / ENTRIES_PER_PAGE)
 
-    # Format header
+    text = format_pokedex_list_text(entries, total_count, filter_type, gen)
+    keyboard = build_pokedex_keyboard(page, total_pages, filter_type, gen)
+
+    await message.answer(text, reply_markup=keyboard.as_markup())
+
+
+def format_pokedex_list_text(
+    entries: list[dict], total_count: int, filter_type: str, gen: int | None
+) -> str:
+    """Format the pokedex list message text."""
     filter_titles = {
         "all": "All Pokemon",
         "caught": "Caught Pokemon",
@@ -346,8 +535,10 @@ async def show_pokedex_list(
         "seen": "Seen (Uncaught)",
     }
 
+    gen_text = f" — Gen {gen}" if gen else ""
+
     lines = [
-        f"📕 <b>Pokédex - {filter_titles.get(filter_type, 'All')}</b>",
+        f"📕 <b>Pokédex - {filter_titles.get(filter_type, 'All')}{gen_text}</b>",
         f"<i>Showing {len(entries)} of {total_count}</i>\n",
     ]
 
@@ -356,9 +547,7 @@ async def show_pokedex_list(
 
     lines.append("\n<b>Legend:</b> ✅ Caught | ✨ Shiny | 👁️ Seen | ❓ Unknown")
 
-    keyboard = build_pokedex_keyboard(page, total_pages, filter_type)
-
-    await message.answer("\n".join(lines), reply_markup=keyboard.as_markup())
+    return "\n".join(lines)
 
 
 async def pokedex_search(
@@ -427,6 +616,10 @@ async def pokedex_search(
     elif species.is_mythical:
         rarity = "💫 Mythical"
 
+    # Generation info
+    gen_name = GEN_NAMES.get(species.generation, "???")
+    gen_text = f"Gen {species.generation} ({gen_name})"
+
     # User's Pokemon of this species
     owned_lines = []
     if user_pokemon:
@@ -448,10 +641,11 @@ async def pokedex_search(
         f"📕 <b>Pokédex Entry #{species.national_dex:03d}</b>\n\n"
         f"<b>{species.name}</b>\n"
         f"Type: {types}\n"
+        f"Generation: {gen_text}\n"
         f"Rarity: {rarity}\n\n"
         f"<b>Status:</b> {status}\n"
         f"<b>Times Caught:</b> {times_caught}{first_caught_text}\n\n"
-        f"<b>Base Stats:</b>\n{stats_line}\n\n"
+        f"<b>Base Stats:</b> (BST: {species.base_stat_total})\n{stats_line}\n\n"
         f"<b>Your {species.name}:</b>\n{owned_text}"
     )
 
@@ -461,17 +655,26 @@ async def pokedex_help(message: Message) -> None:
     await message.answer(
         "📕 <b>Pokédex Commands</b>\n\n"
         "<b>Overview:</b>\n"
-        "/pokedex - Show completion overview\n\n"
+        "/pokedex - Show completion overview\n"
+        "/pokedex gen:N - Overview for generation N\n\n"
         "<b>Browse:</b>\n"
         "/pokedex list - All entries\n"
         "/pokedex caught - Caught Pokemon\n"
         "/pokedex missing - Uncaught Pokemon\n"
         "/pokedex shiny - Shinies obtained\n"
         "/pokedex seen - Seen but uncaught\n\n"
+        "<b>Filters:</b>\n"
+        "gen:N - Filter by generation (1-9)\n"
+        "  e.g. /pokedex list gen:3\n"
+        "  e.g. /pokedex missing gen:1\n\n"
         "<b>Search:</b>\n"
         "/pokedex [name] - Look up by name\n"
         "/pokedex [number] - Look up by Dex #\n"
         "/pokedex search [query]\n\n"
+        "<b>Generations:</b>\n"
+        "1: Kanto (151) | 2: Johto (100) | 3: Hoenn (135)\n"
+        "4: Sinnoh (107) | 5: Unova (156) | 6: Kalos (72)\n"
+        "7: Alola (88) | 8: Galar (96) | 9: Paldea (120)\n\n"
         "<b>Legend:</b>\n"
         "✅ Caught | ✨ Shiny | 👁️ Seen | ❓ Unknown"
     )
@@ -497,9 +700,11 @@ async def handle_pokedex_callback(
     if action == "page":
         page = int(data[2]) if len(data) > 2 else 1
         filter_type = data[3] if len(data) > 3 else "all"
+        gen_str = data[4] if len(data) > 4 else "0"
+        gen = int(gen_str) if gen_str != "0" else None
 
         entries, total_count = await get_pokedex_entries(
-            session, user.telegram_id, page=page, filter_type=filter_type
+            session, user.telegram_id, page=page, filter_type=filter_type, gen=gen
         )
 
         if not entries:
@@ -507,38 +712,20 @@ async def handle_pokedex_callback(
             return
 
         total_pages = math.ceil(total_count / ENTRIES_PER_PAGE)
+        text = format_pokedex_list_text(entries, total_count, filter_type, gen)
+        keyboard = build_pokedex_keyboard(page, total_pages, filter_type, gen)
 
-        filter_titles = {
-            "all": "All Pokemon",
-            "caught": "Caught Pokemon",
-            "missing": "Missing Pokemon",
-            "shiny": "Shiny Pokemon",
-            "seen": "Seen (Uncaught)",
-        }
-
-        lines = [
-            f"📕 <b>Pokédex - {filter_titles.get(filter_type, 'All')}</b>",
-            f"<i>Showing {len(entries)} of {total_count}</i>\n",
-        ]
-
-        for entry in entries:
-            lines.append(format_dex_entry_line(entry, show_details=True))
-
-        lines.append("\n<b>Legend:</b> ✅ Caught | ✨ Shiny | 👁️ Seen | ❓ Unknown")
-
-        keyboard = build_pokedex_keyboard(page, total_pages, filter_type)
-
-        await callback.message.edit_text(
-            "\n".join(lines), reply_markup=keyboard.as_markup()
-        )
+        await callback.message.edit_text(text, reply_markup=keyboard.as_markup())
         await callback.answer()
 
     elif action == "filter":
         filter_type = data[2] if len(data) > 2 else "all"
         page = int(data[3]) if len(data) > 3 else 1
+        gen_str = data[4] if len(data) > 4 else "0"
+        gen = int(gen_str) if gen_str != "0" else None
 
         entries, total_count = await get_pokedex_entries(
-            session, user.telegram_id, page=page, filter_type=filter_type
+            session, user.telegram_id, page=page, filter_type=filter_type, gen=gen
         )
 
         if not entries:
@@ -553,6 +740,8 @@ async def handle_pokedex_callback(
             return
 
         total_pages = math.ceil(total_count / ENTRIES_PER_PAGE)
+        text = format_pokedex_list_text(entries, total_count, filter_type, gen)
+        keyboard = build_pokedex_keyboard(page, total_pages, filter_type, gen)
 
         filter_titles = {
             "all": "All Pokemon",
@@ -562,19 +751,5 @@ async def handle_pokedex_callback(
             "seen": "Seen (Uncaught)",
         }
 
-        lines = [
-            f"📕 <b>Pokédex - {filter_titles.get(filter_type, 'All')}</b>",
-            f"<i>Showing {len(entries)} of {total_count}</i>\n",
-        ]
-
-        for entry in entries:
-            lines.append(format_dex_entry_line(entry, show_details=True))
-
-        lines.append("\n<b>Legend:</b> ✅ Caught | ✨ Shiny | 👁️ Seen | ❓ Unknown")
-
-        keyboard = build_pokedex_keyboard(page, total_pages, filter_type)
-
-        await callback.message.edit_text(
-            "\n".join(lines), reply_markup=keyboard.as_markup()
-        )
+        await callback.message.edit_text(text, reply_markup=keyboard.as_markup())
         await callback.answer(f"Showing {filter_titles.get(filter_type, 'all')}")
