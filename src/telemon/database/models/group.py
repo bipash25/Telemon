@@ -24,7 +24,7 @@ class Group(Base, TimestampMixin):
     # Spawning settings
     spawn_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     spawn_channel_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    spawn_threshold: Mapped[int] = mapped_column(Integer, default=50)
+    spawn_threshold: Mapped[int] = mapped_column(Integer, default=24)
 
     # Message tracking for spawn triggers
     message_count: Mapped[int] = mapped_column(Integer, default=0)

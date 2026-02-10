@@ -166,6 +166,8 @@ async def cmd_catch(message: Message, session: AsyncSession, user: User) -> None
     user.balance += reward
 
     # Update pokedex
+    is_new_pokedex_entry = False
+    pokedex_bonus = 0
     pokedex_result = await session.execute(
         select(PokedexEntry)
         .where(PokedexEntry.user_id == user.telegram_id)
@@ -178,7 +180,18 @@ async def cmd_catch(message: Message, session: AsyncSession, user: User) -> None
         pokedex_entry.times_caught += 1
         if spawn.is_shiny:
             pokedex_entry.caught_shiny = True
+        
+        # Milestone bonuses
+        catches = pokedex_entry.times_caught
+        if catches == 10:
+            pokedex_bonus = 350
+        elif catches == 100:
+            pokedex_bonus = 3500
+        elif catches == 1000:
+            pokedex_bonus = 35000
     else:
+        is_new_pokedex_entry = True
+        pokedex_bonus = 35  # First catch bonus
         pokedex_entry = PokedexEntry(
             user_id=user.telegram_id,
             species_id=spawn.species_id,
@@ -189,6 +202,10 @@ async def cmd_catch(message: Message, session: AsyncSession, user: User) -> None
             first_caught_at=datetime.utcnow(),
         )
         session.add(pokedex_entry)
+
+    # Add pokedex bonus to reward
+    reward += pokedex_bonus
+    user.balance += pokedex_bonus  # Main reward already added above
 
     # Update group stats
     group_result = await session.execute(
@@ -218,20 +235,47 @@ async def cmd_catch(message: Message, session: AsyncSession, user: User) -> None
     await session.commit()
 
     # Build response message
-    shiny_text = " **SHINY**" if spawn.is_shiny else ""
+    shiny_text = " ✨ SHINY" if spawn.is_shiny else ""
     iv_total = sum(ivs.values())
     iv_percent = round((iv_total / 186) * 100, 1)
 
-    await message.answer(
-        f"<b>Congratulations {user.display_name}!</b>\n\n"
-        f"You caught a{shiny_text} <b>{spawn.species.name}</b>!\n\n"
-        f" Level: {new_pokemon.level}\n"
-        f" IVs: {iv_percent}%\n"
-        f" Nature: {nature.capitalize()}\n"
-        f" Ability: {ability}\n"
-        f" Gender: {gender or 'Unknown'}\n\n"
-        f" +{reward} Telecoins{chain_msg}"
-    )
+    # IV quality rating
+    if iv_percent >= 90:
+        iv_rating = "⭐ Amazing!"
+    elif iv_percent >= 75:
+        iv_rating = "Great"
+    elif iv_percent >= 50:
+        iv_rating = "Good"
+    elif iv_percent >= 25:
+        iv_rating = "Average"
+    else:
+        iv_rating = "Poor"
+
+    msg_lines = [
+        f"<b>Congratulations {user.display_name}!</b>\n",
+        f"You caught a{shiny_text} <b>{spawn.species.name}</b>!\n",
+        f"Level: {new_pokemon.level}",
+        f"IVs: {iv_percent}% ({iv_rating})",
+        f"Nature: {nature.capitalize()}",
+    ]
+
+    if gender:
+        msg_lines.append(f"Gender: {'♀' if gender == 'female' else '♂'}")
+
+    msg_lines.append(f"\n+{reward} Telecoins")
+
+    # Pokedex bonus message
+    if is_new_pokedex_entry:
+        msg_lines.append(f"📖 Added to Pokédex! (+{pokedex_bonus} bonus)")
+    elif pokedex_bonus > 0:
+        catches = pokedex_entry.times_caught
+        msg_lines.append(f"🏆 {catches}x catch milestone! (+{pokedex_bonus} bonus)")
+
+    # Shiny chain message
+    if chain_msg:
+        msg_lines.append(chain_msg)
+
+    await message.answer("\n".join(msg_lines))
 
 
 @router.message(Command("hint"))

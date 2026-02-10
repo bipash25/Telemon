@@ -305,59 +305,24 @@ async def cmd_spawn(message: Message, session: AsyncSession, bot: Bot) -> None:
         await message.answer("Failed to create spawn!")
         return
 
-    # Build spawn message
-    from telemon.config import settings
-
-    shiny_text = " (SHINY!)" if spawn.is_shiny else ""
-    rarity_emoji = _get_rarity_emoji(species)
-
-    caption = (
-        f"{rarity_emoji} <b>A wild Pokemon has appeared!</b>{shiny_text}\n\n"
-        f"Use <code>/catch &lt;name&gt;</code> to catch it!\n"
-        f"Use <code>/hint</code> if you need help.\n\n"
-        f"<i>It will flee in {settings.spawn_timeout_seconds // 60} minutes...</i>"
-    )
+    # Use shared spawn message sender
+    from telemon.bot.handlers.spawn import send_spawn_message
 
     try:
-        # Try to send with image
-        if species.sprite_url:
-            msg = await bot.send_photo(
+        msg_id = await send_spawn_message(bot, chat_id, spawn)
+        if msg_id:
+            spawn.message_id = msg_id
+            await session.commit()
+
+            logger.info(
+                "Spawn admin force spawned Pokemon",
                 chat_id=chat_id,
-                photo=species.sprite_url,
-                caption=caption,
+                species=species.name,
+                is_shiny=spawn.is_shiny,
+                admin_id=message.from_user.id if message.from_user else None,
             )
         else:
-            msg = await bot.send_message(
-                chat_id=chat_id,
-                text=caption,
-            )
-
-        # Update spawn with message ID
-        spawn.message_id = msg.message_id
-        await session.commit()
-
-        logger.info(
-            "Spawn admin force spawned Pokemon",
-            chat_id=chat_id,
-            species=species.name,
-            is_shiny=spawn.is_shiny,
-            admin_id=message.from_user.id if message.from_user else None,
-        )
+            await message.answer("Failed to send spawn message!")
     except Exception as e:
         logger.error("Failed to send spawn message", error=str(e), chat_id=chat_id)
         await message.answer(f"Failed to send spawn message: {e}")
-
-
-def _get_rarity_emoji(species: PokemonSpecies) -> str:
-    """Get emoji based on Pokemon rarity."""
-    if species.is_mythical:
-        return "MYTHICAL"
-    if species.is_legendary:
-        return "LEGENDARY"
-    if species.catch_rate <= 3:
-        return "ULTRA RARE"
-    if species.catch_rate <= 45:
-        return "RARE"
-    if species.catch_rate <= 120:
-        return "UNCOMMON"
-    return "COMMON"

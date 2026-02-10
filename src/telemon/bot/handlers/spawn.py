@@ -1,6 +1,7 @@
 """Spawn-related handlers - message tracking and spawn triggers."""
 
-from datetime import datetime, timedelta
+import time
+from datetime import datetime
 
 from aiogram import Bot, F, Router
 from aiogram.types import Message
@@ -9,31 +10,105 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from telemon.config import settings
 from telemon.core.spawning import check_spawn_trigger, create_spawn, get_random_species
-from telemon.database.models import ActiveSpawn, Group, PokedexEntry, PokemonSpecies
+from telemon.database.models import ActiveSpawn, Group, PokemonSpecies
 from telemon.logging import get_logger
 
 router = Router(name="spawn")
 logger = get_logger(__name__)
 
+# In-memory cooldown tracking (simple approach, reset on bot restart)
+# For production, use Redis for persistence across restarts
+_user_cooldowns: dict[int, float] = {}
+_guild_cooldowns: dict[int, float] = {}
+
+
+def _check_user_cooldown(user_id: int) -> bool:
+    """Check if user is on cooldown. Returns True if message should count."""
+    current = time.time()
+    last_time = _user_cooldowns.get(user_id, 0)
+    
+    if current - last_time < settings.spawn_user_cooldown_seconds:
+        return False  # On cooldown, don't count
+    
+    _user_cooldowns[user_id] = current
+    return True
+
+
+def _check_guild_cooldown(guild_id: int) -> bool:
+    """Check if guild is on cooldown. Returns True if message should count."""
+    current = time.time()
+    last_time = _guild_cooldowns.get(guild_id, 0)
+    
+    if current - last_time < settings.spawn_guild_cooldown_seconds:
+        return False  # On cooldown, don't count
+    
+    _guild_cooldowns[guild_id] = current
+    return True
+
+
+def _is_valid_message(message: Message) -> bool:
+    """Check if message is valid for spawn counting (anti-spam)."""
+    # Must have text content
+    if not message.text:
+        return False
+    
+    # Must meet minimum length
+    if len(message.text.strip()) < settings.spawn_min_message_length:
+        return False
+    
+    # Skip commands
+    if message.text.startswith("/"):
+        return False
+    
+    # Skip messages that are just emojis or special chars
+    # Allow if at least 2 alphanumeric characters
+    alphanum_count = sum(1 for c in message.text if c.isalnum())
+    if alphanum_count < 2:
+        return False
+    
+    return True
+
 
 async def send_spawn_message(bot: Bot, chat_id: int, spawn: ActiveSpawn) -> int | None:
     """Send a spawn message with Pokemon image and return message ID."""
+    from aiogram.types import BufferedInputFile
+    from telemon.core.imaging import generate_spawn_image
+
     species = spawn.species
 
     # Build spawn message
-    shiny_text = " ✨" if spawn.is_shiny else ""
-    rarity_emoji = get_rarity_emoji(species)
+    shiny_text = " ✨ SHINY!" if spawn.is_shiny else ""
+    rarity_text = get_rarity_text(species)
 
     caption = (
-        f"{rarity_emoji} <b>A wild Pokémon has appeared!</b>{shiny_text}\n\n"
-        f"Use <code>/catch &lt;name&gt;</code> to catch it!\n"
+        f"🔴 <b>A wild Pokémon has appeared!</b>{shiny_text}\n"
+        f"{rarity_text}\n\n"
+        f"Type <code>/catch [name]</code> to catch it!\n"
         f"Use <code>/hint</code> if you need help.\n\n"
         f"<i>It will flee in {settings.spawn_timeout_seconds // 60} minutes...</i>"
     )
 
     try:
-        # Try to send with image
-        if species.sprite_url:
+        # Generate spawn image with typed background
+        image_data = await generate_spawn_image(
+            dex_number=species.national_dex,
+            primary_type=species.type1 or "normal",
+            shiny=spawn.is_shiny,
+        )
+
+        if image_data:
+            # Send generated image as file upload
+            photo = BufferedInputFile(
+                file=image_data.read(),
+                filename=f"spawn_{species.national_dex}.jpg",
+            )
+            msg = await bot.send_photo(
+                chat_id=chat_id,
+                photo=photo,
+                caption=caption,
+            )
+        elif species.sprite_url:
+            # Fallback to direct URL
             msg = await bot.send_photo(
                 chat_id=chat_id,
                 photo=species.sprite_url,
@@ -51,19 +126,19 @@ async def send_spawn_message(bot: Bot, chat_id: int, spawn: ActiveSpawn) -> int 
         return None
 
 
-def get_rarity_emoji(species: PokemonSpecies) -> str:
-    """Get emoji based on Pokemon rarity."""
+def get_rarity_text(species: PokemonSpecies) -> str:
+    """Get rarity text based on Pokemon rarity."""
     if species.is_mythical:
-        return "🌟"
+        return "🌟 <b>MYTHICAL</b>"
     if species.is_legendary:
-        return "⭐"
+        return "⭐ <b>LEGENDARY</b>"
     if species.catch_rate <= 3:
-        return "💎"
+        return "💎 <b>Ultra Rare</b>"
     if species.catch_rate <= 45:
-        return "🔷"
+        return "🔷 <b>Rare</b>"
     if species.catch_rate <= 120:
-        return "🔹"
-    return "⚪"
+        return "🔹 Uncommon"
+    return ""
 
 
 @router.message(F.chat.type.in_({"group", "supergroup"}))
@@ -73,16 +148,20 @@ async def track_group_message(
     bot: Bot,
 ) -> None:
     """Track messages in groups and trigger spawns."""
-    logger.info("Spawn handler triggered", chat_id=message.chat.id, chat_type=message.chat.type)
-    
     chat_id = message.chat.id
+    user_id = message.from_user.id if message.from_user else 0
 
-    # Skip if message is a command
-    if message.text and message.text.startswith("/"):
-        logger.info("Skipping command message")
+    # Anti-spam: Check if message is valid for counting
+    if not _is_valid_message(message):
         return
-    
-    logger.info("Processing group message", chat_id=chat_id, text=message.text[:30] if message.text else "no-text")
+
+    # Anti-spam: Check user cooldown (1.5 sec between messages counting)
+    if user_id and not _check_user_cooldown(user_id):
+        return
+
+    # Anti-spam: Check guild cooldown (1 sec between any messages counting)
+    if not _check_guild_cooldown(chat_id):
+        return
 
     # Get or create group
     result = await session.execute(
@@ -94,6 +173,7 @@ async def track_group_message(
         group = Group(
             chat_id=chat_id,
             title=message.chat.title,
+            bot_joined_at=datetime.utcnow(),
         )
         session.add(group)
         await session.flush()
@@ -103,13 +183,16 @@ async def track_group_message(
 
     # Increment message count
     group.message_count += 1
-    logger.info(
-        "Incremented message count",
-        chat_id=chat_id,
-        message_count=group.message_count,
-        threshold=group.spawn_threshold,
-    )
     
+    # Log every 5 messages for debugging (reduce spam)
+    if group.message_count % 5 == 0:
+        logger.info(
+            "Message count update",
+            chat_id=chat_id,
+            message_count=group.message_count,
+            threshold=group.spawn_threshold,
+        )
+
     # Flush the increment before checking spawn trigger
     await session.flush()
 
@@ -133,11 +216,6 @@ async def track_group_message(
                 msg_id = await send_spawn_message(bot, chat_id, spawn)
                 if msg_id:
                     spawn.message_id = msg_id
-
-                    # Mark Pokemon as seen for all users who might see this message
-                    # For now, we'll mark it seen when users interact (catch/hint)
-                    # This avoids spamming the database for every group member
-
                     await session.commit()
 
                     logger.info(
@@ -145,6 +223,8 @@ async def track_group_message(
                         chat_id=chat_id,
                         species=species.name,
                         is_shiny=spawn.is_shiny,
+                        rarity="legendary" if species.is_legendary else "mythical" if species.is_mythical else "normal",
                     )
+                    return
 
     await session.commit()

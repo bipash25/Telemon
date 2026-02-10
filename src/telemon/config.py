@@ -32,10 +32,13 @@ class Settings(BaseSettings):
     )
 
     # Spawning Configuration
-    spawn_message_threshold: int = Field(default=50, ge=1, le=1000)
+    spawn_message_threshold: int = Field(default=24, ge=1, le=1000)
     spawn_time_min_minutes: int = Field(default=5, ge=1)
     spawn_time_max_minutes: int = Field(default=15, ge=1)
-    spawn_timeout_seconds: int = Field(default=120, ge=30)
+    spawn_timeout_seconds: int = Field(default=300, ge=30)  # 5 minutes
+    spawn_min_message_length: int = Field(default=3, ge=1)  # Min chars to count
+    spawn_user_cooldown_seconds: float = Field(default=1.5, ge=0)  # Per-user cooldown
+    spawn_guild_cooldown_seconds: float = Field(default=1.0, ge=0)  # Per-guild cooldown
 
     # Economy Configuration
     daily_reward_base: int = Field(default=100, ge=1)
