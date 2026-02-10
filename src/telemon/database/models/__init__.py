@@ -14,6 +14,7 @@ from telemon.database.models.spawn_admin import SpawnAdmin
 from telemon.database.models.species import PokemonSpecies
 from telemon.database.models.trade import Trade, TradeHistory, TradeStatus
 from telemon.database.models.user import User
+from telemon.database.models.wondertrade import WonderTrade
 
 __all__ = [
     # Base
@@ -41,4 +42,5 @@ __all__ = [
     "BattleStatus",
     "PokedexEntry",
     "UserQuest",
+    "WonderTrade",
 ]

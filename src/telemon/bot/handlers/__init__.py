@@ -18,6 +18,7 @@ from telemon.bot.handlers import (
     spawn,
     start,
     trade,
+    wondertrade,
 )
 
 
@@ -45,6 +46,9 @@ def register_all_handlers(dp: Dispatcher) -> None:
 
     # Quest handlers
     dp.include_router(quests.router)
+
+    # Wonder Trade
+    dp.include_router(wondertrade.router)
 
     # Admin handlers
     dp.include_router(admin.router)

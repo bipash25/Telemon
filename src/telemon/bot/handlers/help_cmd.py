@@ -58,6 +58,10 @@ HELP_MESSAGE = """
 /quest - View daily & weekly quests
 /quest claimall - Claim completed quest rewards
 
+<b>Wonder Trade</b>
+/wt [pokemon#] - Deposit for random swap
+/wt status - Check pool status
+
 <b>Pokedex & Hunting</b>
 /pokedex - Pokedex overview (with gen breakdown)
 /pokedex list gen:3 - Browse by generation
@@ -223,6 +227,27 @@ Max friendship: 255
 /daily — +5 to selected Pokemon
 Catching Pokemon — +1 to selected Pokemon  
 Rare Candy — +3 per use
+""",
+    "wondertrade": """
+<b>/wt [pokemon#]</b>
+Also: /wondertrade
+
+Deposit a Pokemon and receive a random one from another trainer!
+
+<b>Commands:</b>
+/wt [pokemon#] — Deposit a Pokemon for trade
+/wt status — Check pool status & your pending trade
+/wt help — Detailed help
+
+<b>How it works:</b>
+1. Use /wt [number] to deposit a Pokemon
+2. If someone is waiting, you swap instantly!
+3. If not, your Pokemon waits for the next trader
+
+<b>Rules:</b>
+- 1 Pokemon in the pool at a time
+- Favorites & selected Pokemon can't be traded
+- 5 minute cooldown between trades
 """,
 }
 

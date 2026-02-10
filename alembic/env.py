@@ -30,6 +30,7 @@ from telemon.database.models.battle import Battle
 from telemon.database.models.pokedex import PokedexEntry
 from telemon.database.models.spawn_admin import SpawnAdmin
 from telemon.database.models.quest import UserQuest
+from telemon.database.models.wondertrade import WonderTrade
 
 # Alembic Config object
 config = context.config
