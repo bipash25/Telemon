@@ -18,12 +18,20 @@ POKEMON_PER_PAGE = 15
 
 
 def parse_pokemon_args(text: str) -> dict:
-    """Parse filter and sort arguments from command."""
+    """Parse filter and sort arguments from command.
+    
+    Supports both formats:
+      /pokemon --shiny --type fire --order iv
+      /pokemon shiny type:fire sort:iv gen:3 name:char
+    """
     args = {
         "shiny": False,
         "legendary": False,
+        "mythical": False,
+        "favorites": False,
         "name": None,
         "type": None,
+        "gen": None,
         "order": "recent",
         "page": 1,
     }
@@ -35,10 +43,32 @@ def parse_pokemon_args(text: str) -> dict:
     i = 0
     while i < len(parts):
         part = parts[i].lower()
-        if part == "--shiny":
+
+        # Flag-style arguments
+        if part in ("--shiny", "shiny"):
             args["shiny"] = True
-        elif part == "--legendary":
+        elif part in ("--legendary", "legendary", "leg"):
             args["legendary"] = True
+        elif part in ("--mythical", "mythical", "myth"):
+            args["mythical"] = True
+        elif part in ("--favorites", "--fav", "favorites", "fav"):
+            args["favorites"] = True
+
+        # Key:value style arguments
+        elif ":" in part:
+            key, _, value = part.partition(":")
+            if key in ("type", "t") and value:
+                args["type"] = value
+            elif key in ("gen", "g", "generation") and value.isdigit():
+                args["gen"] = int(value)
+            elif key in ("name", "n") and value:
+                args["name"] = value
+            elif key in ("sort", "order", "o") and value:
+                args["order"] = value
+            elif key in ("page", "p") and value.isdigit():
+                args["page"] = int(value)
+
+        # Legacy --key value style
         elif part == "--name" and i + 1 < len(parts):
             i += 1
             args["name"] = parts[i].lower()
@@ -48,9 +78,54 @@ def parse_pokemon_args(text: str) -> dict:
         elif part == "--order" and i + 1 < len(parts):
             i += 1
             args["order"] = parts[i].lower()
+        elif part == "--gen" and i + 1 < len(parts):
+            i += 1
+            if parts[i].isdigit():
+                args["gen"] = int(parts[i])
+
+        # Page number as plain digit
+        elif part.isdigit():
+            args["page"] = int(part)
+
         i += 1
 
     return args
+
+
+async def get_user_pokemon_by_index(
+    session: AsyncSession, user_id: int, index: int
+) -> Pokemon | None:
+    """Get a user's Pokemon by 1-based index (ordered by catch date desc)."""
+    result = await session.execute(
+        select(Pokemon)
+        .where(Pokemon.owner_id == user_id)
+        .order_by(Pokemon.caught_at.desc())
+        .offset(index - 1)
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def resolve_pokemon(
+    session: AsyncSession, user: User, arg: str | None
+) -> Pokemon | None:
+    """Resolve a Pokemon from argument (index number or 'latest') or selected Pokemon."""
+    if arg:
+        if arg.isdigit():
+            return await get_user_pokemon_by_index(session, user.telegram_id, int(arg))
+        elif arg == "latest":
+            return await get_user_pokemon_by_index(session, user.telegram_id, 1)
+    
+    # Fall back to selected Pokemon
+    if user.selected_pokemon_id:
+        result = await session.execute(
+            select(Pokemon)
+            .where(Pokemon.id == user.selected_pokemon_id)
+            .where(Pokemon.owner_id == user.telegram_id)
+        )
+        return result.scalar_one_or_none()
+    
+    return None
 
 
 @router.message(Command("pokemon", "p"))
@@ -72,16 +147,22 @@ async def cmd_pokemon(message: Message, session: AsyncSession, user: User) -> No
         query = query.where(Pokemon.is_shiny == True)
     if args["legendary"]:
         query = query.where(PokemonSpecies.is_legendary == True)
+    if args["mythical"]:
+        query = query.where(PokemonSpecies.is_mythical == True)
+    if args["favorites"]:
+        query = query.where(Pokemon.is_favorite == True)
     if args["name"]:
         query = query.where(PokemonSpecies.name_lower.contains(args["name"]))
     if args["type"]:
         query = query.where(
             (PokemonSpecies.type1 == args["type"]) | (PokemonSpecies.type2 == args["type"])
         )
+    if args["gen"]:
+        query = query.where(PokemonSpecies.generation == args["gen"])
 
     # Apply sorting
-    if args["order"] == "iv":
-        # Sort by IV total (calculated)
+    order = args["order"]
+    if order == "iv":
         query = query.order_by(
             (
                 Pokemon.iv_hp
@@ -92,9 +173,13 @@ async def cmd_pokemon(message: Message, session: AsyncSession, user: User) -> No
                 + Pokemon.iv_speed
             ).desc()
         )
-    elif args["order"] == "level":
+    elif order == "level":
         query = query.order_by(Pokemon.level.desc())
-    else:  # recent
+    elif order == "dex":
+        query = query.order_by(PokemonSpecies.national_dex.asc())
+    elif order == "name":
+        query = query.order_by(PokemonSpecies.name.asc())
+    else:  # recent (default)
         query = query.order_by(Pokemon.caught_at.desc())
 
     # Get total count
@@ -103,42 +188,74 @@ async def cmd_pokemon(message: Message, session: AsyncSession, user: User) -> No
     total_count = total_result.scalar() or 0
 
     if total_count == 0:
-        if args["shiny"] or args["legendary"] or args["name"] or args["type"]:
-            await message.answer(" No Pokemon match your filters.")
+        has_filter = args["shiny"] or args["legendary"] or args["mythical"] or args["favorites"] or args["name"] or args["type"] or args["gen"]
+        if has_filter:
+            await message.answer("No Pokemon match your filters.")
         else:
             await message.answer(
-                " You don't have any Pokemon yet!\n"
+                "You don't have any Pokemon yet!\n"
                 "Catch some in group chats with /catch"
             )
         return
 
     # Paginate
     page = args["page"]
+    total_pages = (total_count + POKEMON_PER_PAGE - 1) // POKEMON_PER_PAGE
+    page = max(1, min(page, total_pages))
     offset = (page - 1) * POKEMON_PER_PAGE
     query = query.offset(offset).limit(POKEMON_PER_PAGE)
 
     result = await session.execute(query)
     pokemon_list = result.scalars().all()
 
+    # Build active filter description
+    filter_parts = []
+    if args["shiny"]:
+        filter_parts.append("shiny")
+    if args["legendary"]:
+        filter_parts.append("legendary")
+    if args["mythical"]:
+        filter_parts.append("mythical")
+    if args["favorites"]:
+        filter_parts.append("favorites")
+    if args["type"]:
+        filter_parts.append(f"type:{args['type']}")
+    if args["gen"]:
+        filter_parts.append(f"gen:{args['gen']}")
+    if args["name"]:
+        filter_parts.append(f"name:{args['name']}")
+    
+    filter_text = f" [{', '.join(filter_parts)}]" if filter_parts else ""
+    sort_text = f" sorted by {order}" if order != "recent" else ""
+
     # Build response
-    lines = [f"<b>Your Pokemon</b> ({total_count} total)\n"]
+    lines = [f"<b>Your Pokemon</b> ({total_count} total){filter_text}{sort_text}\n"]
 
     for i, poke in enumerate(pokemon_list):
         idx = offset + i + 1
-        shiny = "" if poke.is_shiny else ""
-        fav = "" if poke.is_favorite else ""
-        name = poke.nickname or poke.species.name
+        shiny = "✨ " if poke.is_shiny else ""
+        fav = "❤️ " if poke.is_favorite else ""
+        
+        # Show species name + nickname if nicknamed
+        if poke.nickname:
+            name = f"{poke.nickname} ({poke.species.name})"
+        else:
+            name = poke.species.name
+        
         iv_pct = poke.iv_percentage
+        
+        # Selected indicator
+        selected = " ◀️" if str(poke.id) == user.selected_pokemon_id else ""
 
         lines.append(
             f"{idx}. {shiny}{fav}<b>{name}</b> "
-            f"Lv.{poke.level} | {iv_pct}% IV"
+            f"Lv.{poke.level} | {iv_pct}% IV{selected}"
         )
 
     # Pagination info
-    total_pages = (total_count + POKEMON_PER_PAGE - 1) // POKEMON_PER_PAGE
     if total_pages > 1:
         lines.append(f"\nPage {page}/{total_pages}")
+        lines.append(f"<i>Use /pokemon {page + 1} for next page</i>" if page < total_pages else "")
 
     # Build pagination keyboard
     builder = InlineKeyboardBuilder()
@@ -148,167 +265,171 @@ async def cmd_pokemon(message: Message, session: AsyncSession, user: User) -> No
         builder.button(text="Next ▶️", callback_data=f"pokemon:page:{page + 1}")
     builder.adjust(2)
 
-    await message.answer("\n".join(lines), reply_markup=builder.as_markup())
+    await message.answer("\n".join(lines), reply_markup=builder.as_markup() if total_pages > 1 else None)
 
 
-@router.message(Command("info"))
+@router.message(Command("info", "i"))
 async def cmd_info(message: Message, session: AsyncSession, user: User) -> None:
     """Handle /info command to show Pokemon details."""
-    # Parse Pokemon ID from args
     text = message.text or ""
     args = text.split()
-
-    if len(args) < 2:
-        # Show info for selected Pokemon
-        if not user.selected_pokemon_id:
-            await message.answer(
-                " Please specify a Pokemon ID or select one with /select"
-            )
-            return
-        pokemon_id = user.selected_pokemon_id
-    else:
-        pokemon_id = args[1]
-
-    # Get Pokemon
-    result = await session.execute(
-        select(Pokemon)
-        .where(Pokemon.owner_id == user.telegram_id)
-        .where(Pokemon.id == pokemon_id)
-    )
-    poke = result.scalar_one_or_none()
+    
+    arg = args[1] if len(args) >= 2 else None
+    poke = await resolve_pokemon(session, user, arg)
 
     if not poke:
-        await message.answer(" Pokemon not found!")
+        await message.answer(
+            "Pokemon not found!\n"
+            "Usage: /info [number] or select one with /select"
+        )
         return
 
     # Build detailed info
-    shiny = " SHINY" if poke.is_shiny else ""
-    fav = " " if poke.is_favorite else ""
+    shiny = " ✨ SHINY" if poke.is_shiny else ""
+    fav = " ❤️" if poke.is_favorite else ""
 
     type_text = poke.species.type1.capitalize()
     if poke.species.type2:
-        type_text += f"/{poke.species.type2.capitalize()}"
+        type_text += f" / {poke.species.type2.capitalize()}"
 
-    info = f"""
-<b>{poke.display_name}</b>{shiny}{fav}
-{poke.species.name} #{poke.species.national_dex}
+    gender_text = ""
+    if poke.gender == "male":
+        gender_text = " ♂"
+    elif poke.gender == "female":
+        gender_text = " ♀"
+
+    # IV quality
+    iv_pct = poke.iv_percentage
+    if iv_pct >= 90:
+        iv_rating = "⭐ Amazing"
+    elif iv_pct >= 75:
+        iv_rating = "Great"
+    elif iv_pct >= 50:
+        iv_rating = "Good"
+    elif iv_pct >= 25:
+        iv_rating = "Average"
+    else:
+        iv_rating = "Poor"
+
+    nickname_line = f'\nNickname: "{poke.nickname}"' if poke.nickname else ""
+
+    info = f"""\
+<b>{poke.display_name}</b>{shiny}{fav}{gender_text}
+{poke.species.name} #{poke.species.national_dex} | Gen {poke.species.generation}{nickname_line}
 
 <b>Type:</b> {type_text}
 <b>Level:</b> {poke.level}
 <b>Nature:</b> {poke.nature.capitalize()}
 <b>Ability:</b> {poke.ability or "Unknown"}
 
-<b>IVs</b> ({poke.iv_percentage}% total)
+<b>IVs</b> ({iv_pct}% - {iv_rating})
 HP: {poke.iv_hp} | Atk: {poke.iv_attack} | Def: {poke.iv_defense}
 SpA: {poke.iv_sp_attack} | SpD: {poke.iv_sp_defense} | Spe: {poke.iv_speed}
 
-<b>EVs</b> ({poke.ev_total}/510)
-HP: {poke.ev_hp} | Atk: {poke.ev_attack} | Def: {poke.ev_defense}
-SpA: {poke.ev_sp_attack} | SpD: {poke.ev_sp_defense} | Spe: {poke.ev_speed}
-
-<b>Moves:</b> {', '.join(poke.moves) if poke.moves else 'None'}
 <b>Held Item:</b> {poke.held_item or 'None'}
 <b>Friendship:</b> {poke.friendship}/255
 
-<i>Caught {poke.caught_at.strftime('%Y-%m-%d')}</i>
-"""
+<i>Caught {poke.caught_at.strftime('%Y-%m-%d')}</i>"""
 
     await message.answer(info)
 
 
-@router.message(Command("select"))
+@router.message(Command("select", "sel"))
 async def cmd_select(message: Message, session: AsyncSession, user: User) -> None:
     """Handle /select command to set active Pokemon."""
     text = message.text or ""
     args = text.split()
 
-    if len(args) < 2:
-        await message.answer(" Usage: /select [pokemon_id]")
+    if len(args) < 2 or not args[1].isdigit():
+        await message.answer("Usage: /select [number]\nExample: /select 1")
         return
 
-    pokemon_id = args[1]
-
-    # Verify ownership
-    result = await session.execute(
-        select(Pokemon)
-        .where(Pokemon.owner_id == user.telegram_id)
-        .where(Pokemon.id == pokemon_id)
-    )
-    poke = result.scalar_one_or_none()
+    poke = await get_user_pokemon_by_index(session, user.telegram_id, int(args[1]))
 
     if not poke:
-        await message.answer(" Pokemon not found!")
+        await message.answer("Pokemon not found! Check your list with /pokemon")
         return
 
     user.selected_pokemon_id = str(poke.id)
     await session.commit()
 
-    await message.answer(f" Selected <b>{poke.display_name}</b> as your active Pokemon!")
+    shiny = " ✨" if poke.is_shiny else ""
+    await message.answer(
+        f"Selected <b>{poke.display_name}</b>{shiny} (Lv.{poke.level}) as your active Pokemon!"
+    )
 
 
-@router.message(Command("nickname"))
+@router.message(Command("nickname", "nick"))
 async def cmd_nickname(message: Message, session: AsyncSession, user: User) -> None:
-    """Handle /nickname command to rename Pokemon."""
+    """Handle /nickname command to rename selected Pokemon."""
     text = message.text or ""
-    args = text.split(maxsplit=2)
+    args = text.split(maxsplit=1)
 
-    if len(args) < 3:
-        await message.answer(" Usage: /nickname [pokemon_id] [new_name]")
+    if len(args) < 2:
+        await message.answer(
+            "<b>Usage:</b>\n"
+            "/nickname [new name] - Rename selected Pokemon\n"
+            "/nickname clear - Remove nickname\n\n"
+            "Select a Pokemon first with /select [number]"
+        )
         return
 
-    pokemon_id = args[1]
-    new_name = args[2][:50]  # Limit to 50 chars
+    new_name = args[1].strip()
 
-    # Verify ownership
-    result = await session.execute(
-        select(Pokemon)
-        .where(Pokemon.owner_id == user.telegram_id)
-        .where(Pokemon.id == pokemon_id)
-    )
-    poke = result.scalar_one_or_none()
-
+    # Get selected Pokemon
+    poke = await resolve_pokemon(session, user, None)
     if not poke:
-        await message.answer(" Pokemon not found!")
+        await message.answer("No Pokemon selected! Use /select [number] first.")
+        return
+
+    if new_name.lower() == "clear":
+        old_name = poke.nickname or poke.species.name
+        poke.nickname = None
+        await session.commit()
+        await message.answer(f"Cleared nickname for <b>{poke.species.name}</b>!")
+        return
+
+    # Validate nickname
+    if len(new_name) > 30:
+        await message.answer("Nickname is too long! Max 30 characters.")
+        return
+
+    if len(new_name) < 1:
+        await message.answer("Nickname cannot be empty!")
         return
 
     old_name = poke.display_name
-    poke.nickname = new_name
+    poke.nickname = new_name[:30]
     await session.commit()
 
-    await message.answer(f" Renamed <b>{old_name}</b> to <b>{new_name}</b>!")
+    await message.answer(
+        f"Renamed <b>{old_name}</b> to <b>{new_name}</b>! ({poke.species.name})"
+    )
 
 
-@router.message(Command("favorite"))
+@router.message(Command("favorite", "fav"))
 async def cmd_favorite(message: Message, session: AsyncSession, user: User) -> None:
     """Handle /favorite command to toggle favorite status."""
     text = message.text or ""
     args = text.split()
 
-    if len(args) < 2:
-        await message.answer(" Usage: /favorite [pokemon_id]")
-        return
-
-    pokemon_id = args[1]
-
-    # Verify ownership
-    result = await session.execute(
-        select(Pokemon)
-        .where(Pokemon.owner_id == user.telegram_id)
-        .where(Pokemon.id == pokemon_id)
-    )
-    poke = result.scalar_one_or_none()
+    arg = args[1] if len(args) >= 2 else None
+    poke = await resolve_pokemon(session, user, arg)
 
     if not poke:
-        await message.answer(" Pokemon not found!")
+        await message.answer(
+            "Pokemon not found!\n"
+            "Usage: /fav [number] or select one with /select first"
+        )
         return
 
     poke.is_favorite = not poke.is_favorite
     await session.commit()
 
     if poke.is_favorite:
-        await message.answer(f" <b>{poke.display_name}</b> is now a favorite!")
+        await message.answer(f"❤️ <b>{poke.display_name}</b> is now a favorite!")
     else:
-        await message.answer(f" <b>{poke.display_name}</b> is no longer a favorite.")
+        await message.answer(f"<b>{poke.display_name}</b> removed from favorites.")
 
 
 @router.message(Command("release"))
@@ -317,32 +438,24 @@ async def cmd_release(message: Message, session: AsyncSession, user: User) -> No
     text = message.text or ""
     args = text.split()
 
-    if len(args) < 2:
-        await message.answer(" Usage: /release [pokemon_id]")
-        return
-
-    pokemon_id = args[1]
-
-    # Verify ownership
-    result = await session.execute(
-        select(Pokemon)
-        .where(Pokemon.owner_id == user.telegram_id)
-        .where(Pokemon.id == pokemon_id)
-    )
-    poke = result.scalar_one_or_none()
+    arg = args[1] if len(args) >= 2 else None
+    poke = await resolve_pokemon(session, user, arg)
 
     if not poke:
-        await message.answer(" Pokemon not found!")
+        await message.answer(
+            "Pokemon not found!\n"
+            "Usage: /release [number]"
+        )
         return
 
     if not poke.is_releasable:
         if poke.is_favorite:
             await message.answer(
-                " This Pokemon is a favorite! "
-                "Remove from favorites first with /favorite"
+                "This Pokemon is a favorite! "
+                "Remove from favorites first with /fav"
             )
         else:
-            await message.answer(" This Pokemon cannot be released right now.")
+            await message.answer("This Pokemon cannot be released right now.")
         return
 
     # Build confirmation keyboard
@@ -352,7 +465,8 @@ async def cmd_release(message: Message, session: AsyncSession, user: User) -> No
     builder.adjust(2)
 
     await message.answer(
-        f" Are you sure you want to release <b>{poke.display_name}</b>?\n"
+        f"Are you sure you want to release <b>{poke.display_name}</b> "
+        f"(Lv.{poke.level}, {poke.iv_percentage}% IV)?\n"
         "This cannot be undone!",
         reply_markup=builder.as_markup(),
     )
@@ -369,7 +483,7 @@ async def callback_release(
     action = callback.data.split(":")[1]
 
     if action == "cancel":
-        await callback.message.edit_text(" Release cancelled.")
+        await callback.message.edit_text("Release cancelled.")
         await callback.answer()
         return
 
@@ -384,7 +498,7 @@ async def callback_release(
         poke = result.scalar_one_or_none()
 
         if not poke or not poke.is_releasable:
-            await callback.message.edit_text(" Pokemon not found or cannot be released.")
+            await callback.message.edit_text("Pokemon not found or cannot be released.")
             await callback.answer()
             return
 
@@ -392,8 +506,75 @@ async def callback_release(
         await session.delete(poke)
         await session.commit()
 
-        await callback.message.edit_text(f" Goodbye, <b>{name}</b>...")
+        await callback.message.edit_text(f"Goodbye, <b>{name}</b>...")
         await callback.answer("Released!")
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("pokemon:page:"))
+async def callback_pokemon_page(
+    callback: CallbackQuery, session: AsyncSession, user: User
+) -> None:
+    """Handle Pokemon list pagination callbacks."""
+    if not callback.data:
+        return
+
+    page = int(callback.data.split(":")[2])
+
+    # Rebuild the query (default filters, just pagination)
+    query = (
+        select(Pokemon)
+        .where(Pokemon.owner_id == user.telegram_id)
+        .join(PokemonSpecies, Pokemon.species_id == PokemonSpecies.national_dex)
+        .order_by(Pokemon.caught_at.desc())
+    )
+
+    # Get total count
+    count_query = select(func.count()).select_from(query.subquery())
+    total_result = await session.execute(count_query)
+    total_count = total_result.scalar() or 0
+
+    total_pages = (total_count + POKEMON_PER_PAGE - 1) // POKEMON_PER_PAGE
+    page = max(1, min(page, total_pages))
+    offset = (page - 1) * POKEMON_PER_PAGE
+
+    result = await session.execute(query.offset(offset).limit(POKEMON_PER_PAGE))
+    pokemon_list = result.scalars().all()
+
+    lines = [f"<b>Your Pokemon</b> ({total_count} total)\n"]
+
+    for i, poke in enumerate(pokemon_list):
+        idx = offset + i + 1
+        shiny = "✨ " if poke.is_shiny else ""
+        fav = "❤️ " if poke.is_favorite else ""
+        
+        if poke.nickname:
+            name = f"{poke.nickname} ({poke.species.name})"
+        else:
+            name = poke.species.name
+
+        iv_pct = poke.iv_percentage
+        selected = " ◀️" if str(poke.id) == user.selected_pokemon_id else ""
+
+        lines.append(
+            f"{idx}. {shiny}{fav}<b>{name}</b> "
+            f"Lv.{poke.level} | {iv_pct}% IV{selected}"
+        )
+
+    if total_pages > 1:
+        lines.append(f"\nPage {page}/{total_pages}")
+
+    builder = InlineKeyboardBuilder()
+    if page > 1:
+        builder.button(text="◀️ Prev", callback_data=f"pokemon:page:{page - 1}")
+    if page < total_pages:
+        builder.button(text="Next ▶️", callback_data=f"pokemon:page:{page + 1}")
+    builder.adjust(2)
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        reply_markup=builder.as_markup() if total_pages > 1 else None,
+    )
+    await callback.answer()
 
 
 @router.message(Command("evolve"))
@@ -443,12 +624,12 @@ async def cmd_evolve(message: Message, session: AsyncSession, user: User) -> Non
         )
         poke = sel_result.scalar_one_or_none()
         if not poke:
-            await message.answer("Your selected Pokemon was not found. Use /evolve <id>")
+            await message.answer("Your selected Pokemon was not found. Use /evolve [number]")
             return
     else:
         await message.answer(
             "Please specify a Pokemon to evolve!\n"
-            "Usage: /evolve [pokemon_id] [item_name]\n"
+            "Usage: /evolve [number] [item name]\n"
             "Example: /evolve 1\n"
             "Example: /evolve 1 fire stone"
         )

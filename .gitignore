@@ -65,6 +65,8 @@ coverage.xml
 # Data files (large)
 data/sprites/
 data/raw/
+data/spawn_cache/
+src/data/spawn_cache/
 
 # OS
 .DS_Store
