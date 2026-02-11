@@ -28,6 +28,7 @@ class LeaderboardType(str, Enum):
     SHINY = "shiny"
     BATTLES = "battles"
     RATING = "rating"
+    GROUP = "group"
 
 
 # Medal emojis for top 3
@@ -282,6 +283,52 @@ async def get_rating_leaderboard(
     return entries, total_users
 
 
+async def get_group_leaderboard(
+    session: AsyncSession, chat_id: int, page: int = 1
+) -> tuple[list[dict], int]:
+    """Get leaderboard by catches in this specific group."""
+    # Count Pokemon caught in this group per user
+    count_query = (
+        select(
+            Pokemon.owner_id,
+            func.count(Pokemon.id).label("total")
+        )
+        .where(Pokemon.caught_in_group_id == chat_id)
+        .group_by(Pokemon.owner_id)
+        .order_by(func.count(Pokemon.id).desc())
+    )
+    
+    # Get total count of users who caught here
+    total_result = await session.execute(
+        select(func.count(func.distinct(Pokemon.owner_id)))
+        .where(Pokemon.caught_in_group_id == chat_id)
+    )
+    total_users = total_result.scalar() or 0
+    
+    # Get page
+    offset = (page - 1) * ENTRIES_PER_PAGE
+    result = await session.execute(
+        count_query.offset(offset).limit(ENTRIES_PER_PAGE)
+    )
+    rows = result.all()
+    
+    entries = []
+    for i, (user_id, total) in enumerate(rows):
+        user_result = await session.execute(
+            select(User).where(User.telegram_id == user_id)
+        )
+        user = user_result.scalar_one_or_none()
+        entries.append({
+            "rank": offset + i + 1,
+            "user_id": user_id,
+            "username": user.display_name if user else f"User {user_id}",
+            "value": total,
+            "label": "catches here",
+        })
+    
+    return entries, total_users
+
+
 async def get_user_rank(
     session: AsyncSession, user_id: int, lb_type: LeaderboardType
 ) -> int | None:
@@ -356,6 +403,7 @@ def build_leaderboard_keyboard(
         ("✨ Shiny", LeaderboardType.SHINY),
         ("⚔️ Battles", LeaderboardType.BATTLES),
         ("🏆 Rating", LeaderboardType.RATING),
+        ("🏠 Group", LeaderboardType.GROUP),
     ]
     
     for label, lb_type in categories:
@@ -371,8 +419,8 @@ def build_leaderboard_keyboard(
         if page < total_pages:
             builder.button(text="▶️", callback_data=f"lb:{current_type.value}:{page + 1}")
     
-    # Adjust layout: 3 categories per row, then 3 for nav
-    builder.adjust(3, 3, 3)
+    # Adjust layout: 4 categories first row, 3 second row, then nav
+    builder.adjust(4, 3, 3)
     
     return builder
 
@@ -388,6 +436,7 @@ def format_leaderboard(
         LeaderboardType.SHINY: "✨ Shiny Collectors",
         LeaderboardType.BATTLES: "⚔️ Battle Champions",
         LeaderboardType.RATING: "🏆 Top Rated",
+        LeaderboardType.GROUP: "🏠 Group Catches",
     }
     
     lines = [
@@ -440,6 +489,9 @@ async def cmd_leaderboard(message: Message, session: AsyncSession, user: User) -
             "rating": LeaderboardType.RATING,
             "elo": LeaderboardType.RATING,
             "ranked": LeaderboardType.RATING,
+            "group": LeaderboardType.GROUP,
+            "server": LeaderboardType.GROUP,
+            "chat": LeaderboardType.GROUP,
         }
         
         if subcommand in type_map:
@@ -462,7 +514,8 @@ async def show_leaderboard_help(message: Message) -> None:
         "• pokedex - Most species caught\n"
         "• shiny - Most shinies owned\n"
         "• battles - Most battle wins\n"
-        "• rating - Highest battle rating\n\n"
+        "• rating - Highest battle rating\n"
+        "• group - Most catches in this group\n\n"
         "<b>Examples:</b>\n"
         "/lb - Default (catches)\n"
         "/lb wealth - Richest trainers\n"
@@ -480,7 +533,14 @@ async def show_leaderboard(
 ) -> None:
     """Show a leaderboard."""
     # Get leaderboard data
-    if lb_type == LeaderboardType.CATCHES:
+    chat_id = message.chat.id if message.chat.type != "private" else None
+    
+    if lb_type == LeaderboardType.GROUP:
+        if not chat_id:
+            await message.answer("Group leaderboard is only available in groups!")
+            return
+        entries, total = await get_group_leaderboard(session, chat_id, page)
+    elif lb_type == LeaderboardType.CATCHES:
         entries, total = await get_catches_leaderboard(session, page)
     elif lb_type == LeaderboardType.WEALTH:
         entries, total = await get_wealth_leaderboard(session, page)
@@ -547,7 +607,14 @@ async def handle_leaderboard_callback(
         return
     
     # Get leaderboard data
-    if lb_type == LeaderboardType.CATCHES:
+    if lb_type == LeaderboardType.GROUP:
+        # Use chat_id from the callback message
+        chat_id = callback.message.chat.id if callback.message and callback.message.chat.type != "private" else None
+        if not chat_id:
+            await callback.answer("Group leaderboard unavailable in DMs")
+            return
+        entries, total = await get_group_leaderboard(session, chat_id, page)
+    elif lb_type == LeaderboardType.CATCHES:
         entries, total = await get_catches_leaderboard(session, page)
     elif lb_type == LeaderboardType.WEALTH:
         entries, total = await get_wealth_leaderboard(session, page)

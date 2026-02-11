@@ -113,8 +113,9 @@ async def cmd_daily(message: Message, session: AsyncSession, user: User) -> None
     user.daily_streak += 1
     user.last_daily = now
 
-    # Friendship bonus: selected Pokemon gets friendship
+    # Friendship bonus: selected Pokemon gets friendship + XP
     friendship_text = ""
+    daily_xp_text = ""
     if user.selected_pokemon_id:
         sel_result = await session.execute(
             select(Pokemon)
@@ -130,6 +131,17 @@ async def cmd_daily(message: Message, session: AsyncSession, user: User) -> None
             sel_poke.friendship = min(255, sel_poke.friendship + gain)
             actual = sel_poke.friendship - old
             friendship_text = f"\n{sel_poke.display_name}: +{actual} friendship ({sel_poke.friendship}/255)"
+
+        # XP from daily claim
+        if sel_poke and sel_poke.level < 100:
+            from telemon.core.leveling import calculate_daily_xp, add_xp_to_pokemon, format_xp_message
+
+            daily_xp = calculate_daily_xp(user.daily_streak)
+            xp_added, levels_gained = await add_xp_to_pokemon(
+                session, str(sel_poke.id), daily_xp
+            )
+            if xp_added > 0:
+                daily_xp_text = "\n" + format_xp_message(sel_poke.display_name, xp_added, levels_gained)
 
     await session.commit()
 
@@ -159,7 +171,7 @@ async def cmd_daily(message: Message, session: AsyncSession, user: User) -> None
         f"+{base_reward} Telecoins{streak_text}\n"
         f"Total: <b>+{total_reward}</b> Telecoins\n\n"
         f"New balance: {user.balance:,} Telecoins\n"
-        f"Current streak: {user.daily_streak} days{friendship_text}{daily_quest_msg}{daily_ach_text}"
+        f"Current streak: {user.daily_streak} days{friendship_text}{daily_xp_text}{daily_quest_msg}{daily_ach_text}"
     )
 
 

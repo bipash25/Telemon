@@ -654,6 +654,28 @@ async def execute_trade(message: Message, session: AsyncSession, trade: Trade) -
     await update_quest_progress(session, trade.user1_id, "trade")
     await update_quest_progress(session, trade.user2_id, "trade")
 
+    # XP rewards from trading
+    from telemon.core.leveling import calculate_trade_xp, add_xp_to_pokemon, format_xp_message
+    trade_xp = calculate_trade_xp()
+
+    for trader_id in [trade.user1_id, trade.user2_id]:
+        trader_result = await session.execute(
+            select(User).where(User.telegram_id == trader_id)
+        )
+        trader = trader_result.scalar_one_or_none()
+        if trader and trader.selected_pokemon_id:
+            xp_added, levels_gained = await add_xp_to_pokemon(
+                session, trader.selected_pokemon_id, trade_xp
+            )
+            if xp_added > 0 and levels_gained:
+                poke_r = await session.execute(
+                    select(Pokemon).where(Pokemon.id == trader.selected_pokemon_id)
+                )
+                poke = poke_r.scalar_one_or_none()
+                if poke:
+                    response += f"\n{poke.display_name} leveled up to Lv.{poke.level}!"
+    await session.commit()
+
     # Achievement hooks for trade
     from telemon.core.achievements import check_achievements, format_achievement_notification
     trade_achs_1 = await check_achievements(session, trade.user1_id, "trade")

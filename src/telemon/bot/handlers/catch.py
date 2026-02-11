@@ -232,6 +232,8 @@ async def cmd_catch(message: Message, session: AsyncSession, user: User) -> None
                 chain_msg = f"\n⛓️‍💥 Chain broken! (was {old_chain})"
 
     # Friendship gain: selected Pokemon gets +1 per catch (Soothe Bell: +2)
+    # Also award XP from catching
+    xp_msg = ""
     if user.selected_pokemon_id:
         sel_result = await session.execute(
             select(Pokemon)
@@ -244,6 +246,17 @@ async def cmd_catch(message: Message, session: AsyncSession, user: User) -> None
             if sel_poke.held_item and sel_poke.held_item.lower() == "soothe bell":
                 gain = 2
             sel_poke.friendship = min(255, sel_poke.friendship + gain)
+
+        # XP from catching
+        if sel_poke and sel_poke.level < 100:
+            from telemon.core.leveling import calculate_catch_xp, add_xp_to_pokemon, format_xp_message
+
+            catch_xp = calculate_catch_xp(new_pokemon.level, spawn.species.catch_rate)
+            xp_added, levels_gained = await add_xp_to_pokemon(
+                session, str(sel_poke.id), catch_xp
+            )
+            if xp_added > 0:
+                xp_msg = "\n" + format_xp_message(sel_poke.display_name, xp_added, levels_gained)
 
     session.add(new_pokemon)
     await session.commit()
@@ -308,6 +321,10 @@ async def cmd_catch(message: Message, session: AsyncSession, user: User) -> None
     # Shiny chain message
     if chain_msg:
         msg_lines.append(chain_msg)
+
+    # XP gain message
+    if xp_msg:
+        msg_lines.append(xp_msg)
 
     # Quest progress
     if quest_msg:

@@ -39,6 +39,9 @@ HELP_MESSAGE = """
 
 <b>Battle</b>
 /duel @user - Challenge to PvP battle
+/battle wild - Fight a random wild Pokemon
+/battle npc - List NPC trainers (gym leaders)
+/battle npc [name] - Fight a specific trainer
 
 <b>Trading</b>
 /trade @user - Start a trade
@@ -73,7 +76,7 @@ HELP_MESSAGE = """
 
 <b>Leaderboards</b>
 /leaderboard - View rankings
-/lb catches/wealth/pokedex/shiny/battles/rating
+/lb catches/wealth/pokedex/shiny/battles/rating/group
 /rank - Your ranking
 
 <b>Achievements</b>
@@ -273,6 +276,33 @@ Special — Perfect IV, Legendary, Mythical catches
 Wonder Trade — Wonder Trade milestones (10)
 
 Each achievement grants a TC reward when unlocked.
+""",
+    "battle": """
+<b>/battle</b>
+Also: /duel
+
+Battle other trainers or fight wild Pokemon and NPC trainers!
+
+<b>PvP:</b>
+/duel @username — Challenge a player to a 1v1 battle
+
+<b>PvE - Wild:</b>
+/battle wild — Fight a random wild Pokemon
+Earn XP and Telecoins. Wild level matches yours (+-5).
+
+<b>PvE - NPC Trainers:</b>
+/battle npc — List all available NPC trainers
+/battle npc brock — Fight Gym Leader Brock
+/battle npc lance — Fight Elite Four Lance
+/battle npc red — Fight Champion Red
+
+NPC trainers scale with your level and give bonus rewards.
+Higher difficulty trainers give bigger multipliers!
+
+<b>During Battle:</b>
+Select moves with inline buttons
+Type effectiveness, stats, STAB all apply
+/forfeit — End battle early
 """,
 }
 

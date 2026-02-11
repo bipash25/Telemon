@@ -555,3 +555,260 @@ async def cancel_battle(session: AsyncSession, battle: Battle) -> None:
     """Cancel a pending battle."""
     battle.status = BattleStatus.CANCELLED
     await session.commit()
+
+
+# ============================================================
+# PvE Battle System — Wild encounters and NPC trainers
+# ============================================================
+
+@dataclass
+class PveParticipant:
+    """Represents a participant in a PvE battle (player or enemy)."""
+    name: str
+    level: int
+    type1: str
+    type2: str | None
+    hp: int
+    max_hp: int
+    attack: int
+    defense: int
+    sp_attack: int
+    sp_defense: int
+    speed: int
+    moves: list[dict]
+
+
+# NPC Trainer data — 8 Kanto gym leaders + Lance + Red
+NPC_TRAINERS: dict[str, dict] = {
+    "brock": {
+        "title": "Gym Leader Brock",
+        "species_id": 95,  # Onix
+        "level_offset": 0,
+        "reward_multiplier": 1.5,
+        "quote": "My rock-hard willpower is legendary!",
+    },
+    "misty": {
+        "title": "Gym Leader Misty",
+        "species_id": 121,  # Starmie
+        "level_offset": 2,
+        "reward_multiplier": 1.5,
+        "quote": "My water Pokemon are the best!",
+    },
+    "surge": {
+        "title": "Lt. Surge",
+        "species_id": 26,  # Raichu
+        "level_offset": 3,
+        "reward_multiplier": 1.6,
+        "quote": "Hey kid, you won't live long in combat!",
+    },
+    "erika": {
+        "title": "Gym Leader Erika",
+        "species_id": 45,  # Vileplume
+        "level_offset": 4,
+        "reward_multiplier": 1.6,
+        "quote": "I love the sweet fragrance of flowers...",
+    },
+    "koga": {
+        "title": "Gym Leader Koga",
+        "species_id": 110,  # Weezing
+        "level_offset": 5,
+        "reward_multiplier": 1.7,
+        "quote": "A ninja strikes from the shadows!",
+    },
+    "sabrina": {
+        "title": "Gym Leader Sabrina",
+        "species_id": 65,  # Alakazam
+        "level_offset": 6,
+        "reward_multiplier": 1.8,
+        "quote": "I foresaw your arrival...",
+    },
+    "blaine": {
+        "title": "Gym Leader Blaine",
+        "species_id": 59,  # Arcanine
+        "level_offset": 7,
+        "reward_multiplier": 1.8,
+        "quote": "Hah! My Pokemon are all fired up!",
+    },
+    "giovanni": {
+        "title": "Gym Leader Giovanni",
+        "species_id": 34,  # Nidoking
+        "level_offset": 8,
+        "reward_multiplier": 2.0,
+        "quote": "I shall show you the true power of Team Rocket!",
+    },
+    "lance": {
+        "title": "Elite Four Lance",
+        "species_id": 149,  # Dragonite
+        "level_offset": 10,
+        "reward_multiplier": 2.5,
+        "quote": "You dare challenge the Dragon Master?",
+    },
+    "red": {
+        "title": "Champion Red",
+        "species_id": 6,  # Charizard
+        "level_offset": 15,
+        "reward_multiplier": 3.0,
+        "quote": "...",
+    },
+}
+
+
+def get_species_moves(type1: str, type2: str | None, level: int) -> list[dict]:
+    """Generate moves for a wild/NPC Pokemon based on its types and level."""
+    moves = []
+
+    t1 = type1.lower()
+    if t1 in DEFAULT_MOVES:
+        m = DEFAULT_MOVES[t1]
+        moves.append({"name": m["name"], "type": t1, "power": m["power"],
+                       "accuracy": m["accuracy"], "category": m["category"]})
+
+    if type2:
+        t2 = type2.lower()
+        if t2 in DEFAULT_MOVES:
+            m = DEFAULT_MOVES[t2]
+            moves.append({"name": m["name"], "type": t2, "power": m["power"],
+                           "accuracy": m["accuracy"], "category": m["category"]})
+
+    if t1 != "normal":
+        m = DEFAULT_MOVES["normal"]
+        moves.append({"name": m["name"], "type": "normal", "power": m["power"],
+                       "accuracy": m["accuracy"], "category": m["category"]})
+
+    if level >= 30 and t1 in STRONG_MOVES:
+        m = STRONG_MOVES[t1]
+        moves.append({"name": m["name"], "type": t1, "power": m["power"],
+                       "accuracy": m["accuracy"], "category": m["category"]})
+
+    return moves[:4]
+
+
+def build_pve_participant_from_species(
+    species: PokemonSpecies, level: int, iv_value: int = 15
+) -> PveParticipant:
+    """Build a PveParticipant from species data with fixed IVs."""
+    t1 = species.type1.lower()
+    t2 = species.type2.lower() if species.type2 else None
+
+    hp = calculate_stat(species.base_hp, iv_value, 0, level, is_hp=True)
+    attack = calculate_stat(species.base_attack, iv_value, 0, level)
+    defense = calculate_stat(species.base_defense, iv_value, 0, level)
+    sp_attack = calculate_stat(species.base_sp_attack, iv_value, 0, level)
+    sp_defense = calculate_stat(species.base_sp_defense, iv_value, 0, level)
+    speed = calculate_stat(species.base_speed, iv_value, 0, level)
+
+    moves = get_species_moves(t1, t2, level)
+
+    return PveParticipant(
+        name=species.name,
+        level=level,
+        type1=t1,
+        type2=t2,
+        hp=hp,
+        max_hp=hp,
+        attack=attack,
+        defense=defense,
+        sp_attack=sp_attack,
+        sp_defense=sp_defense,
+        speed=speed,
+        moves=moves,
+    )
+
+
+def build_pve_participant_from_pokemon(pokemon: Pokemon) -> PveParticipant:
+    """Build a PveParticipant from a real player Pokemon."""
+    species = pokemon.species
+    t1 = species.type1.lower()
+    t2 = species.type2.lower() if species.type2 else None
+
+    hp = calculate_stat(species.base_hp, pokemon.iv_hp, pokemon.ev_hp, pokemon.level, is_hp=True)
+    attack = calculate_stat(species.base_attack, pokemon.iv_attack, pokemon.ev_attack, pokemon.level)
+    defense = calculate_stat(species.base_defense, pokemon.iv_defense, pokemon.ev_defense, pokemon.level)
+    sp_attack = calculate_stat(species.base_sp_attack, pokemon.iv_sp_attack, pokemon.ev_sp_attack, pokemon.level)
+    sp_defense = calculate_stat(species.base_sp_defense, pokemon.iv_sp_defense, pokemon.ev_sp_defense, pokemon.level)
+    speed = calculate_stat(species.base_speed, pokemon.iv_speed, pokemon.ev_speed, pokemon.level)
+
+    # Use player's pokemon's moves (same logic as PvP)
+    bp_moves = get_pokemon_moves(pokemon, species)
+    moves = [{"name": m.name, "type": m.type, "power": m.power,
+              "accuracy": m.accuracy, "category": m.category} for m in bp_moves]
+
+    return PveParticipant(
+        name=pokemon.display_name,
+        level=pokemon.level,
+        type1=t1,
+        type2=t2,
+        hp=hp,
+        max_hp=hp,
+        attack=attack,
+        defense=defense,
+        sp_attack=sp_attack,
+        sp_defense=sp_defense,
+        speed=speed,
+        moves=moves,
+    )
+
+
+def pve_calculate_damage(
+    attacker: PveParticipant,
+    defender: PveParticipant,
+    move: dict,
+) -> DamageResult:
+    """Calculate damage for a PvE attack using raw stat values."""
+    # Check accuracy
+    if random.randint(1, 100) > move["accuracy"]:
+        return DamageResult(
+            damage=0,
+            effectiveness=1.0,
+            is_critical=False,
+            message=f"{attacker.name}'s attack missed!",
+        )
+
+    level = attacker.level
+
+    if move["category"] == "physical":
+        attack_stat = attacker.attack
+        defense_stat = defender.defense
+    else:
+        attack_stat = attacker.sp_attack
+        defense_stat = defender.sp_defense
+
+    # Base damage
+    base_damage = (((2 * level / 5 + 2) * move["power"] * attack_stat / defense_stat) / 50 + 2)
+
+    # STAB
+    move_type = move["type"]
+    stab = 1.5 if move_type in [attacker.type1, attacker.type2] else 1.0
+
+    # Type effectiveness
+    defender_types = [defender.type1]
+    if defender.type2:
+        defender_types.append(defender.type2)
+    effectiveness = get_type_effectiveness(move_type, defender_types)
+
+    # Critical hit
+    is_critical = random.random() < 0.0625
+    crit_multiplier = 1.5 if is_critical else 1.0
+
+    # Random factor
+    random_factor = random.randint(85, 100) / 100
+
+    damage = int(base_damage * stab * effectiveness * crit_multiplier * random_factor)
+    damage = max(1, damage)
+
+    if effectiveness == 0:
+        damage = 0
+
+    messages = [f"{attacker.name} used {move['name']}!"]
+    eff_msg = get_effectiveness_message(effectiveness)
+    if eff_msg:
+        messages.append(eff_msg)
+    if is_critical:
+        messages.append("A critical hit!")
+
+    return DamageResult(
+        damage=damage,
+        effectiveness=effectiveness,
+        is_critical=is_critical,
+        message="\n".join(messages),
+    )

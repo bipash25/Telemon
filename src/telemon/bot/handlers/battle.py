@@ -1,4 +1,7 @@
-"""Battle-related handlers for PvP duels."""
+"""Battle-related handlers for PvP duels and PvE wild/NPC battles."""
+
+import random
+from dataclasses import asdict
 
 from aiogram import Router
 from aiogram.filters import Command
@@ -15,13 +18,28 @@ from telemon.core.battle import (
     forfeit_battle,
     cancel_battle,
     MoveData,
+    NPC_TRAINERS,
+    PveParticipant,
+    build_pve_participant_from_pokemon,
+    build_pve_participant_from_species,
+    pve_calculate_damage,
 )
-from telemon.database.models import Pokemon, User
+from telemon.core.leveling import (
+    add_xp_to_pokemon,
+    calculate_wild_battle_xp,
+    calculate_npc_battle_xp,
+    format_xp_message,
+    xp_for_next_level,
+)
+from telemon.database.models import Pokemon, PokemonSpecies, User
 from telemon.database.models.battle import Battle, BattleStatus
 from telemon.logging import get_logger
 
 router = Router(name="battle")
 logger = get_logger(__name__)
+
+# In-memory PvE battle storage: user_id -> battle state dict
+_pve_battles: dict[int, dict] = {}
 
 
 def format_hp_bar(current: int, maximum: int, length: int = 10) -> str:
@@ -109,17 +127,30 @@ def build_move_keyboard(battle: Battle, user_id: int) -> InlineKeyboardBuilder:
 
 @router.message(Command("duel", "battle"))
 async def cmd_duel(message: Message, session: AsyncSession, user: User) -> None:
-    """Handle /duel command to challenge another user."""
+    """Handle /duel command to challenge another user, or /battle wild|npc."""
     text = message.text or ""
     args = text.split()
+    
+    if len(args) >= 2:
+        subcommand = args[1].lower()
+        if subcommand == "wild":
+            await cmd_battle_wild(message, session, user)
+            return
+        elif subcommand == "npc":
+            await cmd_battle_npc(message, session, user, args)
+            return
     
     if len(args) < 2:
         await message.answer(
             "<b>Battle System</b>\n\n"
-            "Challenge another trainer to a 1v1 battle!\n\n"
-            "<b>Usage:</b>\n"
+            "Challenge trainers or fight wild Pokemon!\n\n"
+            "<b>PvP:</b>\n"
             "/duel @username - Challenge by username\n"
             "/duel [user_id] - Challenge by ID\n\n"
+            "<b>PvE:</b>\n"
+            "/battle wild - Fight a random wild Pokemon\n"
+            "/battle npc - List NPC trainers\n"
+            "/battle npc [name] - Fight a gym leader\n\n"
             "<b>During Battle:</b>\n"
             "Select moves using inline buttons\n"
             "Type effectiveness and stats matter!\n\n"
@@ -405,21 +436,19 @@ async def callback_execute_move(
         # Award rewards
         winner.balance += move_result["winner_coins"]
         
-        # Add XP to winner's Pokemon
+        # Add XP to winner's Pokemon using leveling system
         winner_poke_id = (battle.player1_team[0] if move_result["winner_id"] == battle.player1_id 
                          else battle.player2_team[0])
-        winner_poke_result = await session.execute(
-            select(Pokemon).where(Pokemon.id == winner_poke_id)
+        xp_added, levels_gained = await add_xp_to_pokemon(
+            session, str(winner_poke_id), move_result["winner_xp"]
         )
-        winner_poke = winner_poke_result.scalar_one()
-        winner_poke.experience += move_result["winner_xp"]
         
-        # Check for level up (simple formula)
-        xp_needed = winner_poke.level * 100
-        while winner_poke.experience >= xp_needed and winner_poke.level < 100:
-            winner_poke.level += 1
-            winner_poke.experience -= xp_needed
-            xp_needed = winner_poke.level * 100
+        if levels_gained:
+            winner_poke_result = await session.execute(
+                select(Pokemon).where(Pokemon.id == winner_poke_id)
+            )
+            winner_poke = winner_poke_result.scalar_one()
+            lines.append(f"\n{winner_poke.display_name} leveled up to Lv.{winner_poke.level}!")
         
         await session.commit()
         
@@ -528,6 +557,12 @@ async def callback_forfeit_battle(
 @router.message(Command("forfeit"))
 async def cmd_forfeit(message: Message, session: AsyncSession, user: User) -> None:
     """Handle /forfeit command."""
+    # Check PvE first
+    if user.telegram_id in _pve_battles:
+        del _pve_battles[user.telegram_id]
+        await message.answer("You fled from the battle!")
+        return
+    
     battle = await get_active_battle(session, user.telegram_id)
     
     if not battle:
@@ -546,3 +581,537 @@ async def cmd_forfeit(message: Message, session: AsyncSession, user: User) -> No
         f" You forfeited the battle!\n"
         f"@{winner_name} wins!"
     )
+
+
+# =================================================================
+# PvE Battle Handlers — Wild encounters and NPC trainers
+# =================================================================
+
+
+def format_pve_status(state: dict) -> str:
+    """Format PvE battle status display."""
+    player = state["player"]
+    enemy = state["enemy"]
+    enemy_label = state.get("enemy_label", "Wild Pokemon")
+    turn = state["turn"]
+
+    lines = [
+        f"<b>{enemy_label} — Turn {turn}</b>\n",
+        f"<b>You</b>",
+        f"{player['name']} Lv.{player['level']}",
+        f"HP: {_pve_hp_bar(player['hp'], player['max_hp'])}",
+        "",
+        f"<b>Opponent</b>",
+        f"{enemy['name']} Lv.{enemy['level']}",
+        f"HP: {_pve_hp_bar(enemy['hp'], enemy['max_hp'])}",
+    ]
+
+    return "\n".join(lines)
+
+
+def _pve_hp_bar(current: int, maximum: int, length: int = 10) -> str:
+    filled = int((current / maximum) * length) if maximum > 0 else 0
+    empty = length - filled
+    return f"[{'█' * filled}{'░' * empty}] {current}/{maximum}"
+
+
+def build_pve_move_keyboard(state: dict, user_id: int) -> InlineKeyboardBuilder:
+    """Build move buttons for PvE battle."""
+    builder = InlineKeyboardBuilder()
+
+    for i, move in enumerate(state["player"]["moves"]):
+        move_text = f"{move['name']} ({move['type'].title()})"
+        builder.button(text=move_text, callback_data=f"pve:move:{user_id}:{i}")
+
+    builder.button(text="Flee", callback_data=f"pve:flee:{user_id}")
+    builder.adjust(2)
+
+    return builder
+
+
+async def cmd_battle_wild(message: Message, session: AsyncSession, user: User) -> None:
+    """Start a wild Pokemon battle."""
+    # Check if user already in battle
+    if user.telegram_id in _pve_battles:
+        await message.answer(
+            "You're already in a battle!\nUse the move buttons or /forfeit to end it."
+        )
+        return
+
+    active_pvp = await get_active_battle(session, user.telegram_id)
+    if active_pvp:
+        await message.answer("You're already in a PvP battle!")
+        return
+
+    # Get player's selected Pokemon
+    if not user.selected_pokemon_id:
+        await message.answer("You need to select a Pokemon first!\nUse /select [#]")
+        return
+
+    poke_result = await session.execute(
+        select(Pokemon).where(Pokemon.id == user.selected_pokemon_id)
+    )
+    player_poke = poke_result.scalar_one_or_none()
+    if not player_poke:
+        await message.answer("Your selected Pokemon was not found!")
+        return
+
+    # Pick random wild species
+    from telemon.core.spawning.engine import get_random_species
+
+    wild_species = await get_random_species(session)
+    if not wild_species:
+        await message.answer("Could not find any wild Pokemon!")
+        return
+
+    # Wild Pokemon level is close to player's level (+-5)
+    wild_level = max(1, min(100, player_poke.level + random.randint(-5, 5)))
+
+    # Build participants
+    player_part = build_pve_participant_from_pokemon(player_poke)
+    enemy_part = build_pve_participant_from_species(wild_species, wild_level, iv_value=10)
+
+    # Determine who goes first
+    player_first = player_part.speed >= enemy_part.speed
+
+    # Store PvE battle state in memory
+    state = {
+        "player": {
+            "name": player_part.name,
+            "level": player_part.level,
+            "type1": player_part.type1,
+            "type2": player_part.type2,
+            "hp": player_part.hp,
+            "max_hp": player_part.max_hp,
+            "attack": player_part.attack,
+            "defense": player_part.defense,
+            "sp_attack": player_part.sp_attack,
+            "sp_defense": player_part.sp_defense,
+            "speed": player_part.speed,
+            "moves": player_part.moves,
+        },
+        "enemy": {
+            "name": enemy_part.name,
+            "level": enemy_part.level,
+            "type1": enemy_part.type1,
+            "type2": enemy_part.type2,
+            "hp": enemy_part.hp,
+            "max_hp": enemy_part.max_hp,
+            "attack": enemy_part.attack,
+            "defense": enemy_part.defense,
+            "sp_attack": enemy_part.sp_attack,
+            "sp_defense": enemy_part.sp_defense,
+            "speed": enemy_part.speed,
+            "moves": enemy_part.moves,
+        },
+        "pokemon_id": str(player_poke.id),
+        "enemy_species_id": wild_species.national_dex,
+        "enemy_label": f"Wild {wild_species.name}",
+        "turn": 1,
+        "player_first": player_first,
+        "mode": "wild",
+        "reward_multiplier": 1.0,
+        "coin_reward_base": 50 + wild_level * 5,
+    }
+
+    _pve_battles[user.telegram_id] = state
+
+    status = format_pve_status(state)
+    builder = build_pve_move_keyboard(state, user.telegram_id)
+
+    await message.answer(
+        f"A wild <b>{wild_species.name}</b> (Lv.{wild_level}) appeared!\n\n"
+        f"{status}",
+        reply_markup=builder.as_markup(),
+    )
+
+    logger.info(
+        "PvE wild battle started",
+        user_id=user.telegram_id,
+        player_pokemon=player_poke.display_name,
+        wild_species=wild_species.name,
+        wild_level=wild_level,
+    )
+
+
+async def cmd_battle_npc(
+    message: Message, session: AsyncSession, user: User, args: list[str]
+) -> None:
+    """Start an NPC trainer battle."""
+    # If no trainer specified, show list
+    if len(args) < 3:
+        lines = [
+            "<b>NPC Trainers</b>\n",
+            "Challenge famous trainers to earn extra XP and coins!\n",
+            "<b>Gym Leaders:</b>",
+        ]
+        for key, data in NPC_TRAINERS.items():
+            mult = data["reward_multiplier"]
+            lines.append(f"  /battle npc {key} — {data['title']} (x{mult} rewards)")
+        lines.append("\n<i>Trainer Pokemon level scales with yours.</i>")
+
+        await message.answer("\n".join(lines))
+        return
+
+    trainer_key = args[2].lower()
+
+    if trainer_key not in NPC_TRAINERS:
+        valid = ", ".join(NPC_TRAINERS.keys())
+        await message.answer(
+            f"Unknown trainer! Available: {valid}\n"
+            "Use /battle npc to see the full list."
+        )
+        return
+
+    # Check if already in battle
+    if user.telegram_id in _pve_battles:
+        await message.answer(
+            "You're already in a battle!\n"
+            "Use the move buttons or /forfeit to end it."
+        )
+        return
+
+    active_pvp = await get_active_battle(session, user.telegram_id)
+    if active_pvp:
+        await message.answer("You're already in a PvP battle!")
+        return
+
+    # Get player's Pokemon
+    if not user.selected_pokemon_id:
+        await message.answer("You need to select a Pokemon first!\nUse /select [#]")
+        return
+
+    poke_result = await session.execute(
+        select(Pokemon).where(Pokemon.id == user.selected_pokemon_id)
+    )
+    player_poke = poke_result.scalar_one_or_none()
+    if not player_poke:
+        await message.answer("Your selected Pokemon was not found!")
+        return
+
+    trainer_data = NPC_TRAINERS[trainer_key]
+
+    # Get NPC's species
+    species_result = await session.execute(
+        select(PokemonSpecies).where(
+            PokemonSpecies.national_dex == trainer_data["species_id"]
+        )
+    )
+    npc_species = species_result.scalar_one_or_none()
+    if not npc_species:
+        await message.answer("Error loading NPC trainer data!")
+        return
+
+    # NPC level scales with player + offset
+    npc_level = min(100, player_poke.level + trainer_data["level_offset"])
+
+    # Build participants
+    player_part = build_pve_participant_from_pokemon(player_poke)
+    enemy_part = build_pve_participant_from_species(npc_species, npc_level, iv_value=20)
+
+    player_first = player_part.speed >= enemy_part.speed
+
+    state = {
+        "player": {
+            "name": player_part.name,
+            "level": player_part.level,
+            "type1": player_part.type1,
+            "type2": player_part.type2,
+            "hp": player_part.hp,
+            "max_hp": player_part.max_hp,
+            "attack": player_part.attack,
+            "defense": player_part.defense,
+            "sp_attack": player_part.sp_attack,
+            "sp_defense": player_part.sp_defense,
+            "speed": player_part.speed,
+            "moves": player_part.moves,
+        },
+        "enemy": {
+            "name": enemy_part.name,
+            "level": enemy_part.level,
+            "type1": enemy_part.type1,
+            "type2": enemy_part.type2,
+            "hp": enemy_part.hp,
+            "max_hp": enemy_part.max_hp,
+            "attack": enemy_part.attack,
+            "defense": enemy_part.defense,
+            "sp_attack": enemy_part.sp_attack,
+            "sp_defense": enemy_part.sp_defense,
+            "speed": enemy_part.speed,
+            "moves": enemy_part.moves,
+        },
+        "pokemon_id": str(player_poke.id),
+        "enemy_species_id": npc_species.national_dex,
+        "enemy_label": trainer_data["title"],
+        "turn": 1,
+        "player_first": player_first,
+        "mode": "npc",
+        "npc_key": trainer_key,
+        "reward_multiplier": trainer_data["reward_multiplier"],
+        "coin_reward_base": int((80 + npc_level * 8) * trainer_data["reward_multiplier"]),
+    }
+
+    _pve_battles[user.telegram_id] = state
+
+    status = format_pve_status(state)
+    builder = build_pve_move_keyboard(state, user.telegram_id)
+
+    await message.answer(
+        f"<b>{trainer_data['title']}</b> challenges you!\n"
+        f"<i>\"{trainer_data['quote']}\"</i>\n\n"
+        f"{trainer_data['title']} sends out <b>{npc_species.name}</b> (Lv.{npc_level})!\n\n"
+        f"{status}",
+        reply_markup=builder.as_markup(),
+    )
+
+    logger.info(
+        "PvE NPC battle started",
+        user_id=user.telegram_id,
+        player_pokemon=player_poke.display_name,
+        npc=trainer_key,
+        npc_level=npc_level,
+    )
+
+
+def _dict_to_participant(d: dict) -> PveParticipant:
+    """Convert a state dict back to PveParticipant."""
+    return PveParticipant(
+        name=d["name"],
+        level=d["level"],
+        type1=d["type1"],
+        type2=d["type2"],
+        hp=d["hp"],
+        max_hp=d["max_hp"],
+        attack=d["attack"],
+        defense=d["defense"],
+        sp_attack=d["sp_attack"],
+        sp_defense=d["sp_defense"],
+        speed=d["speed"],
+        moves=d["moves"],
+    )
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("pve:move:"))
+async def callback_pve_move(
+    callback: CallbackQuery, session: AsyncSession, user: User
+) -> None:
+    """Handle PvE move selection."""
+    if not callback.data:
+        return
+
+    parts = callback.data.split(":")
+    target_user_id = int(parts[2])
+    move_index = int(parts[3])
+
+    if user.telegram_id != target_user_id:
+        await callback.answer("This is not your battle!", show_alert=True)
+        return
+
+    state = _pve_battles.get(user.telegram_id)
+    if not state:
+        await callback.answer("No active battle found!", show_alert=True)
+        return
+
+    player_part = _dict_to_participant(state["player"])
+    enemy_part = _dict_to_participant(state["enemy"])
+
+    moves = state["player"]["moves"]
+    if move_index >= len(moves):
+        move_index = 0
+    player_move = moves[move_index]
+
+    lines = []
+
+    # Player attacks first (or based on speed)
+    if state["player_first"]:
+        # Player attacks
+        result = pve_calculate_damage(player_part, enemy_part, player_move)
+        lines.append(result.message)
+        if result.damage > 0:
+            lines.append(f"Dealt <b>{result.damage}</b> damage!")
+        state["enemy"]["hp"] = max(0, state["enemy"]["hp"] - result.damage)
+
+        # Check if enemy fainted
+        if state["enemy"]["hp"] <= 0:
+            await _handle_pve_win(callback, session, user, state, lines)
+            return
+
+        # Enemy counter-attacks
+        enemy_move = random.choice(state["enemy"]["moves"])
+        # Refresh participants with current HP
+        enemy_part_updated = _dict_to_participant(state["enemy"])
+        player_part_updated = _dict_to_participant(state["player"])
+
+        enemy_result = pve_calculate_damage(enemy_part_updated, player_part_updated, enemy_move)
+        lines.append("")
+        lines.append(enemy_result.message)
+        if enemy_result.damage > 0:
+            lines.append(f"You took <b>{enemy_result.damage}</b> damage!")
+        state["player"]["hp"] = max(0, state["player"]["hp"] - enemy_result.damage)
+
+        if state["player"]["hp"] <= 0:
+            await _handle_pve_loss(callback, user, state, lines)
+            return
+    else:
+        # Enemy attacks first
+        enemy_move = random.choice(state["enemy"]["moves"])
+        enemy_result = pve_calculate_damage(enemy_part, player_part, enemy_move)
+        lines.append(enemy_result.message)
+        if enemy_result.damage > 0:
+            lines.append(f"You took <b>{enemy_result.damage}</b> damage!")
+        state["player"]["hp"] = max(0, state["player"]["hp"] - enemy_result.damage)
+
+        if state["player"]["hp"] <= 0:
+            await _handle_pve_loss(callback, user, state, lines)
+            return
+
+        # Player attacks
+        player_part_updated = _dict_to_participant(state["player"])
+        enemy_part_updated = _dict_to_participant(state["enemy"])
+
+        result = pve_calculate_damage(player_part_updated, enemy_part_updated, player_move)
+        lines.append("")
+        lines.append(result.message)
+        if result.damage > 0:
+            lines.append(f"Dealt <b>{result.damage}</b> damage!")
+        state["enemy"]["hp"] = max(0, state["enemy"]["hp"] - result.damage)
+
+        if state["enemy"]["hp"] <= 0:
+            await _handle_pve_win(callback, session, user, state, lines)
+            return
+
+    # Battle continues
+    state["turn"] += 1
+
+    status = format_pve_status(state)
+    builder = build_pve_move_keyboard(state, user.telegram_id)
+
+    lines.extend(["", status])
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        reply_markup=builder.as_markup(),
+    )
+    await callback.answer()
+
+
+async def _handle_pve_win(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    user: User,
+    state: dict,
+    lines: list[str],
+) -> None:
+    """Handle player winning a PvE battle."""
+    enemy_name = state["enemy"]["name"]
+    enemy_level = state["enemy"]["level"]
+    player_level = state["player"]["level"]
+    pokemon_id = state["pokemon_id"]
+    mode = state["mode"]
+    multiplier = state["reward_multiplier"]
+
+    # Calculate rewards
+    if mode == "npc":
+        xp_reward = calculate_npc_battle_xp(player_level, enemy_level, multiplier)
+    else:
+        xp_reward = calculate_wild_battle_xp(player_level, enemy_level)
+    coin_reward = state["coin_reward_base"]
+
+    # Apply rewards
+    user.balance += coin_reward
+    xp_added, levels_gained = await add_xp_to_pokemon(session, pokemon_id, xp_reward)
+
+    # Battle win stats (counts for PvE too)
+    user.battle_wins += 1
+    await session.commit()
+
+    lines.extend([
+        "",
+        f"<b>{enemy_name} fainted!</b>",
+        "",
+        f"<b>You win!</b>",
+        f"Rewards: {xp_reward} XP, {coin_reward} TC",
+    ])
+
+    if levels_gained:
+        poke_result = await session.execute(
+            select(Pokemon).where(Pokemon.id == pokemon_id)
+        )
+        poke = poke_result.scalar_one()
+        lines.append(f"{poke.display_name} leveled up to Lv.{poke.level}!")
+
+    # Quest progress
+    from telemon.core.quests import update_quest_progress
+    quest_completed = await update_quest_progress(session, user.telegram_id, "battle_win")
+    if quest_completed:
+        await session.commit()
+        for q in quest_completed:
+            lines.append(f"📋 Quest complete: {q.description} (+{q.reward_coins:,} TC)")
+
+    # Achievement hooks
+    from telemon.core.achievements import check_achievements, format_achievement_notification
+    battle_achs = await check_achievements(session, user.telegram_id, "battle_win")
+    if battle_achs:
+        await session.commit()
+        lines.append(format_achievement_notification(battle_achs))
+
+    # Clean up
+    del _pve_battles[user.telegram_id]
+
+    await callback.message.edit_text("\n".join(lines))
+    await callback.answer("You won!")
+
+    logger.info(
+        "PvE battle won",
+        user_id=user.telegram_id,
+        mode=mode,
+        enemy=enemy_name,
+        xp=xp_reward,
+        coins=coin_reward,
+    )
+
+
+async def _handle_pve_loss(
+    callback: CallbackQuery,
+    user: User,
+    state: dict,
+    lines: list[str],
+) -> None:
+    """Handle player losing a PvE battle."""
+    player_name = state["player"]["name"]
+    enemy_label = state.get("enemy_label", "Wild Pokemon")
+
+    lines.extend([
+        "",
+        f"<b>{player_name} fainted!</b>",
+        "",
+        f"You were defeated by <b>{enemy_label}</b>!",
+        "<i>Better luck next time, trainer!</i>",
+    ])
+
+    # Clean up
+    del _pve_battles[user.telegram_id]
+
+    await callback.message.edit_text("\n".join(lines))
+    await callback.answer("You lost!")
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("pve:flee:"))
+async def callback_pve_flee(
+    callback: CallbackQuery, session: AsyncSession, user: User
+) -> None:
+    """Handle fleeing from PvE battle."""
+    if not callback.data:
+        return
+
+    target_user_id = int(callback.data.split(":")[2])
+
+    if user.telegram_id != target_user_id:
+        await callback.answer("This is not your battle!", show_alert=True)
+        return
+
+    if user.telegram_id in _pve_battles:
+        del _pve_battles[user.telegram_id]
+
+    await callback.message.edit_text("You fled from the battle!")
+    await callback.answer("Fled!")
