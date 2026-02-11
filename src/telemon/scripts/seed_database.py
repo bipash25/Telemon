@@ -10,6 +10,7 @@ from sqlalchemy.dialects.postgresql import insert
 from telemon.core.items import ALL_ITEMS
 from telemon.database import async_session_factory, init_db
 from telemon.database.models import Item, PokemonSpecies
+from telemon.database.models.move import Move, PokemonLearnset
 from telemon.logging import get_logger, setup_logging
 
 logger = get_logger(__name__)
@@ -114,6 +115,100 @@ async def seed_pokemon() -> None:
         logger.info("Seeded Pokemon species", before=existing_count, after=new_count, added=new_count - existing_count)
 
 
+async def seed_moves() -> None:
+    """Seed the moves table from JSON file."""
+    data_path = Path(__file__).parent.parent.parent.parent / "data" / "moves.json"
+
+    if not data_path.exists():
+        logger.warning("Moves data file not found — run scripts/fetch_moves.py first", path=str(data_path))
+        return
+
+    with open(data_path) as f:
+        moves_data = json.load(f)
+
+    async with async_session_factory() as session:
+        result = await session.execute(text("SELECT COUNT(*) FROM moves"))
+        existing_count = result.scalar() or 0
+
+        logger.info(f"Found {existing_count} existing moves, loading {len(moves_data)} from JSON")
+
+        for move in moves_data:
+            values = {
+                "id": move["id"],
+                "name": move["name"],
+                "name_lower": move["name_lower"],
+                "type": move["type"],
+                "category": move["category"],
+                "power": move.get("power"),
+                "accuracy": move.get("accuracy"),
+                "pp": move.get("pp", 20),
+                "priority": move.get("priority", 0),
+                "effect": move.get("effect"),
+                "effect_chance": move.get("effect_chance"),
+                "description": move.get("description"),
+                "generation": move.get("generation", 1),
+                "makes_contact": move.get("makes_contact", False),
+                "crit_rate": move.get("crit_rate", 0),
+            }
+
+            stmt = insert(Move).values(**values)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["id"],
+                set_={k: v for k, v in values.items() if k != "id"},
+            )
+            await session.execute(stmt)
+
+        await session.commit()
+
+        result = await session.execute(text("SELECT COUNT(*) FROM moves"))
+        new_count = result.scalar() or 0
+        logger.info("Seeded moves", before=existing_count, after=new_count, added=new_count - existing_count)
+
+
+async def seed_learnsets() -> None:
+    """Seed the pokemon_learnsets table from JSON file."""
+    data_path = Path(__file__).parent.parent.parent.parent / "data" / "learnsets.json"
+
+    if not data_path.exists():
+        logger.warning("Learnsets data file not found — run scripts/fetch_moves.py first", path=str(data_path))
+        return
+
+    with open(data_path) as f:
+        learnsets_data = json.load(f)
+
+    async with async_session_factory() as session:
+        result = await session.execute(text("SELECT COUNT(*) FROM pokemon_learnsets"))
+        existing_count = result.scalar() or 0
+
+        logger.info(f"Found {existing_count} existing learnset entries")
+
+        total = 0
+        for species_data in learnsets_data:
+            species_id = species_data["species_id"]
+
+            for move_entry in species_data["level_up_moves"]:
+                values = {
+                    "species_id": species_id,
+                    "move_id": move_entry["move_id"],
+                    "learn_method": "level-up",
+                    "level_learned": move_entry["level"],
+                }
+
+                stmt = insert(PokemonLearnset).values(**values)
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["species_id", "move_id", "learn_method"],
+                    set_={"level_learned": values["level_learned"]},
+                )
+                await session.execute(stmt)
+                total += 1
+
+        await session.commit()
+
+        result = await session.execute(text("SELECT COUNT(*) FROM pokemon_learnsets"))
+        new_count = result.scalar() or 0
+        logger.info("Seeded learnsets", before=existing_count, after=new_count, total_processed=total)
+
+
 async def main() -> None:
     """Run all seed functions."""
     setup_logging()
@@ -123,6 +218,8 @@ async def main() -> None:
 
     await seed_items()
     await seed_pokemon()
+    await seed_moves()
+    await seed_learnsets()
 
     logger.info("Database seeding complete!")
 

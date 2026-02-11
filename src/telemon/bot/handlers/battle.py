@@ -21,6 +21,7 @@ from telemon.core.battle import (
     NPC_TRAINERS,
     PveParticipant,
     build_pve_participant_from_pokemon,
+    build_pve_participant_from_pokemon_db,
     build_pve_participant_from_species,
     pve_calculate_damage,
 )
@@ -439,7 +440,7 @@ async def callback_execute_move(
         # Add XP to winner's Pokemon using leveling system
         winner_poke_id = (battle.player1_team[0] if move_result["winner_id"] == battle.player1_id 
                          else battle.player2_team[0])
-        xp_added, levels_gained = await add_xp_to_pokemon(
+        xp_added, levels_gained, learned_moves = await add_xp_to_pokemon(
             session, str(winner_poke_id), move_result["winner_xp"]
         )
         
@@ -449,6 +450,9 @@ async def callback_execute_move(
             )
             winner_poke = winner_poke_result.scalar_one()
             lines.append(f"\n{winner_poke.display_name} leveled up to Lv.{winner_poke.level}!")
+        if learned_moves:
+            for mv in learned_moves:
+                lines.append(f"{mv} was learned!")
         
         await session.commit()
         
@@ -668,7 +672,7 @@ async def cmd_battle_wild(message: Message, session: AsyncSession, user: User) -
     wild_level = max(1, min(100, player_poke.level + random.randint(-5, 5)))
 
     # Build participants
-    player_part = build_pve_participant_from_pokemon(player_poke)
+    player_part = await build_pve_participant_from_pokemon_db(session, player_poke)
     enemy_part = build_pve_participant_from_species(wild_species, wild_level, iv_value=10)
 
     # Determine who goes first
@@ -689,6 +693,7 @@ async def cmd_battle_wild(message: Message, session: AsyncSession, user: User) -
             "sp_defense": player_part.sp_defense,
             "speed": player_part.speed,
             "moves": player_part.moves,
+            "ability": player_part.ability,
         },
         "enemy": {
             "name": enemy_part.name,
@@ -703,6 +708,7 @@ async def cmd_battle_wild(message: Message, session: AsyncSession, user: User) -
             "sp_defense": enemy_part.sp_defense,
             "speed": enemy_part.speed,
             "moves": enemy_part.moves,
+            "ability": enemy_part.ability,
         },
         "pokemon_id": str(player_poke.id),
         "enemy_species_id": wild_species.national_dex,
@@ -806,7 +812,7 @@ async def cmd_battle_npc(
     npc_level = min(100, player_poke.level + trainer_data["level_offset"])
 
     # Build participants
-    player_part = build_pve_participant_from_pokemon(player_poke)
+    player_part = await build_pve_participant_from_pokemon_db(session, player_poke)
     enemy_part = build_pve_participant_from_species(npc_species, npc_level, iv_value=20)
 
     player_first = player_part.speed >= enemy_part.speed
@@ -825,6 +831,7 @@ async def cmd_battle_npc(
             "sp_defense": player_part.sp_defense,
             "speed": player_part.speed,
             "moves": player_part.moves,
+            "ability": player_part.ability,
         },
         "enemy": {
             "name": enemy_part.name,
@@ -839,6 +846,7 @@ async def cmd_battle_npc(
             "sp_defense": enemy_part.sp_defense,
             "speed": enemy_part.speed,
             "moves": enemy_part.moves,
+            "ability": enemy_part.ability,
         },
         "pokemon_id": str(player_poke.id),
         "enemy_species_id": npc_species.national_dex,
@@ -888,6 +896,7 @@ def _dict_to_participant(d: dict) -> PveParticipant:
         sp_defense=d["sp_defense"],
         speed=d["speed"],
         moves=d["moves"],
+        ability=d.get("ability", ""),
     )
 
 
@@ -1019,7 +1028,7 @@ async def _handle_pve_win(
 
     # Apply rewards
     user.balance += coin_reward
-    xp_added, levels_gained = await add_xp_to_pokemon(session, pokemon_id, xp_reward)
+    xp_added, levels_gained, learned_moves = await add_xp_to_pokemon(session, pokemon_id, xp_reward)
 
     # Battle win stats (counts for PvE too)
     user.battle_wins += 1
@@ -1039,6 +1048,9 @@ async def _handle_pve_win(
         )
         poke = poke_result.scalar_one()
         lines.append(f"{poke.display_name} leveled up to Lv.{poke.level}!")
+    if learned_moves:
+        for mv in learned_moves:
+            lines.append(f"{mv} was learned!")
 
     # Quest progress
     from telemon.core.quests import update_quest_progress

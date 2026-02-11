@@ -27,8 +27,8 @@ def xp_for_next_level(level: int) -> int:
 
 async def add_xp_to_pokemon(
     session: AsyncSession, pokemon_id: str, xp_amount: int
-) -> tuple[int, list[int]]:
-    """Add XP to a Pokemon and handle level ups.
+) -> tuple[int, list[int], list[str]]:
+    """Add XP to a Pokemon and handle level ups + move learning.
 
     Args:
         session: DB session
@@ -36,7 +36,7 @@ async def add_xp_to_pokemon(
         xp_amount: Amount of XP to add
 
     Returns:
-        Tuple of (xp_amount_actually_added, list_of_new_levels_reached)
+        Tuple of (xp_amount_actually_added, list_of_new_levels_reached, list_of_learned_move_names)
     """
     from telemon.database.models import Pokemon
 
@@ -46,8 +46,9 @@ async def add_xp_to_pokemon(
     pokemon = result.scalar_one_or_none()
 
     if not pokemon or pokemon.level >= 100:
-        return 0, []
+        return 0, [], []
 
+    old_level = pokemon.level
     pokemon.experience += xp_amount
     levels_gained = []
 
@@ -58,7 +59,16 @@ async def add_xp_to_pokemon(
         levels_gained.append(pokemon.level)
         xp_needed = xp_for_next_level(pokemon.level)
 
-    return xp_amount, levels_gained
+    # Auto-learn moves on level-up
+    learned_moves: list[str] = []
+    if levels_gained:
+        from telemon.core.moves import auto_learn_moves_on_levelup
+
+        learned_moves = await auto_learn_moves_on_levelup(
+            session, pokemon, old_level, pokemon.level
+        )
+
+    return xp_amount, levels_gained, learned_moves
 
 
 def calculate_catch_xp(pokemon_level: int, catch_rate: int) -> int:
@@ -107,7 +117,8 @@ def calculate_daily_xp(streak: int) -> int:
 
 
 def format_xp_message(
-    pokemon_name: str, xp_amount: int, levels_gained: list[int]
+    pokemon_name: str, xp_amount: int, levels_gained: list[int],
+    learned_moves: list[str] | None = None,
 ) -> str:
     """Format an XP gain message for display."""
     parts = [f"{pokemon_name}: +{xp_amount} XP"]
@@ -118,5 +129,9 @@ def format_xp_message(
             parts.append(f"Level up! Now Lv.{new_level}!")
         else:
             parts.append(f"Gained {len(levels_gained)} levels! Now Lv.{new_level}!")
+
+    if learned_moves:
+        for move in learned_moves:
+            parts.append(f"Learned {move}!")
 
     return " | ".join(parts)

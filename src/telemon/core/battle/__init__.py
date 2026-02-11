@@ -136,6 +136,99 @@ def get_effectiveness_message(multiplier: float) -> str:
     return ""
 
 
+# ============================================================
+# Ability effects — applied as damage modifiers
+# ============================================================
+
+def apply_ability_damage_modifier(
+    attacker_ability: str,
+    defender_ability: str,
+    move_type: str,
+    move_category: str,
+    defender_types: list[str],
+    effectiveness: float,
+    attack_stat: int,
+    defense_stat: int,
+    defender_hp: int,
+    defender_max_hp: int,
+) -> tuple[float, int, int, list[str]]:
+    """Apply ability effects to damage calculation.
+
+    Returns (effectiveness_override, attack_stat, defense_stat, ability_messages).
+    """
+    messages: list[str] = []
+    atk = attacker_ability.lower().replace("-", " ").replace("_", " ") if attacker_ability else ""
+    defn = defender_ability.lower().replace("-", " ").replace("_", " ") if defender_ability else ""
+
+    # --- Defender abilities (immunities / damage reduction) ---
+
+    # Levitate — immune to Ground moves
+    if defn == "levitate" and move_type == "ground":
+        messages.append("Levitate makes it immune to Ground moves!")
+        return 0.0, attack_stat, defense_stat, messages
+
+    # Flash Fire — immune to Fire moves (would boost own Fire, tracked but not modeled further)
+    if defn == "flash fire" and move_type == "fire":
+        messages.append("Flash Fire absorbed the fire attack!")
+        return 0.0, attack_stat, defense_stat, messages
+
+    # Water Absorb — immune to Water moves
+    if defn == "water absorb" and move_type == "water":
+        messages.append("Water Absorb nullified the attack!")
+        return 0.0, attack_stat, defense_stat, messages
+
+    # Volt Absorb — immune to Electric moves
+    if defn == "volt absorb" and move_type == "electric":
+        messages.append("Volt Absorb nullified the attack!")
+        return 0.0, attack_stat, defense_stat, messages
+
+    # Thick Fat — halve Fire and Ice damage
+    if defn == "thick fat" and move_type in ("fire", "ice"):
+        attack_stat = attack_stat // 2
+        messages.append("Thick Fat reduced the damage!")
+
+    # Sturdy — survive a one-hit KO at full HP (caller must clamp damage)
+    # (Handled separately in damage result — we flag it here)
+
+    # --- Attacker abilities (damage boosts) ---
+
+    # Guts — 1.5x Attack when status'd (we don't track status yet, so always apply for now)
+    # Actually, skip this since we don't have status conditions yet.
+
+    # Huge Power / Pure Power — double physical Attack
+    if atk in ("huge power", "pure power") and move_category == "physical":
+        attack_stat = int(attack_stat * 2)
+        messages.append(f"{atk.title()} boosted the attack!")
+
+    # Adaptability — STAB becomes 2x instead of 1.5x (handled separately)
+
+    return effectiveness, attack_stat, defense_stat, messages
+
+
+def check_sturdy(
+    defender_ability: str,
+    defender_hp: int,
+    defender_max_hp: int,
+    damage: int,
+) -> tuple[int, str]:
+    """Check Sturdy — survive with 1 HP if at full HP and would be KO'd.
+
+    Returns (adjusted_damage, message_or_empty).
+    """
+    ability = (defender_ability or "").lower().replace("-", " ").replace("_", " ")
+    if ability == "sturdy" and defender_hp == defender_max_hp and damage >= defender_hp:
+        return defender_hp - 1, "Sturdy let it hang on with 1 HP!"
+    return damage, ""
+
+
+def get_stab_multiplier(attacker_ability: str) -> float:
+    """Return the STAB multiplier, boosted by Adaptability."""
+    ability = (attacker_ability or "").lower().replace("-", " ").replace("_", " ")
+    if ability == "adaptability":
+        return 2.0
+    return 1.5
+
+
 def calculate_stat(base: int, iv: int, ev: int, level: int, is_hp: bool = False) -> int:
     """Calculate actual stat value using Pokemon formula."""
     if is_hp:
@@ -199,8 +292,56 @@ def get_pokemon_moves(pokemon: Pokemon, species: PokemonSpecies) -> list[MoveDat
     return moves[:4]  # Max 4 moves
 
 
-def create_battle_pokemon(pokemon: Pokemon, species: PokemonSpecies) -> BattlePokemon:
-    """Create a BattlePokemon from a Pokemon instance."""
+async def get_pokemon_moves_from_db(
+    session: AsyncSession, pokemon: Pokemon, species: PokemonSpecies
+) -> list[MoveData]:
+    """Get moves for a Pokemon, using real DB moves if available.
+    
+    Falls back to default type-based moves if Pokemon has no moves set.
+    """
+    if pokemon.moves and len(pokemon.moves) > 0:
+        # Fetch real moves from DB
+        from telemon.database.models.move import Move
+        result = await session.execute(
+            select(Move).where(Move.name_lower.in_([m.lower() for m in pokemon.moves]))
+        )
+        db_moves = result.scalars().all()
+        
+        if db_moves:
+            move_data_list = []
+            for db_move in db_moves:
+                # Only include damaging moves or give status moves a minimal power
+                power = db_move.power if db_move.power else 0
+                accuracy = db_move.accuracy if db_move.accuracy else 100
+                
+                # Skip pure status moves in battle for now (they have no power)
+                if power == 0 and db_move.category == "status":
+                    continue
+                
+                move_data_list.append(MoveData(
+                    name=db_move.name,
+                    type=db_move.type,
+                    power=power,
+                    accuracy=accuracy,
+                    category=db_move.category if db_move.category != "status" else "special",
+                ))
+            
+            if move_data_list:
+                return move_data_list[:4]
+    
+    # Fallback to default type-based moves
+    return get_pokemon_moves(pokemon, species)
+
+
+def create_battle_pokemon(
+    pokemon: Pokemon, species: PokemonSpecies,
+    resolved_moves: list[MoveData] | None = None,
+) -> BattlePokemon:
+    """Create a BattlePokemon from a Pokemon instance.
+
+    If *resolved_moves* is provided (from DB lookup), those are used
+    directly; otherwise falls back to the default type-based moveset.
+    """
     max_hp = calculate_stat(
         species.base_hp, pokemon.iv_hp, pokemon.ev_hp, pokemon.level, is_hp=True
     )
@@ -210,7 +351,7 @@ def create_battle_pokemon(pokemon: Pokemon, species: PokemonSpecies) -> BattlePo
         species=species,
         current_hp=max_hp,
         max_hp=max_hp,
-        moves=get_pokemon_moves(pokemon, species),
+        moves=resolved_moves or get_pokemon_moves(pokemon, species),
     )
 
 
@@ -219,7 +360,7 @@ def calculate_damage(
     defender: BattlePokemon,
     move: MoveData,
 ) -> DamageResult:
-    """Calculate damage for an attack."""
+    """Calculate damage for an attack (PvP)."""
     # Check accuracy
     if random.randint(1, 100) > move.accuracy:
         return DamageResult(
@@ -259,18 +400,36 @@ def calculate_damage(
             defender.pokemon.level,
         )
     
-    # Base damage calculation
-    base_damage = (((2 * level / 5 + 2) * move.power * attack_stat / defense_stat) / 50 + 2)
-    
-    # STAB (Same Type Attack Bonus)
-    stab = 1.5 if move.type in [attacker.species.type1.lower(), 
-                                 (attacker.species.type2 or "").lower()] else 1.0
-    
     # Type effectiveness
     defender_types = [defender.species.type1.lower()]
     if defender.species.type2:
         defender_types.append(defender.species.type2.lower())
     effectiveness = get_type_effectiveness(move.type, defender_types)
+
+    # Ability modifiers
+    attacker_ability = getattr(attacker.pokemon, "ability", "") or ""
+    defender_ability = getattr(defender.pokemon, "ability", "") or ""
+
+    effectiveness, attack_stat, defense_stat, ability_msgs = apply_ability_damage_modifier(
+        attacker_ability=attacker_ability,
+        defender_ability=defender_ability,
+        move_type=move.type,
+        move_category=move.category,
+        defender_types=defender_types,
+        effectiveness=effectiveness,
+        attack_stat=attack_stat,
+        defense_stat=defense_stat,
+        defender_hp=defender.current_hp,
+        defender_max_hp=defender.max_hp,
+    )
+
+    # Base damage calculation
+    base_damage = (((2 * level / 5 + 2) * move.power * attack_stat / defense_stat) / 50 + 2)
+    
+    # STAB (Same Type Attack Bonus) — boosted by Adaptability
+    is_stab = move.type in [attacker.species.type1.lower(), 
+                             (attacker.species.type2 or "").lower()]
+    stab = get_stab_multiplier(attacker_ability) if is_stab else 1.0
     
     # Critical hit (6.25% chance)
     is_critical = random.random() < 0.0625
@@ -285,6 +444,14 @@ def calculate_damage(
     
     if effectiveness == 0:
         damage = 0
+
+    # Sturdy check
+    if damage > 0:
+        damage, sturdy_msg = check_sturdy(
+            defender_ability, defender.current_hp, defender.max_hp, damage
+        )
+        if sturdy_msg:
+            ability_msgs.append(sturdy_msg)
     
     # Build message
     messages = [f"{attacker.species.name} used {move.name}!"]
@@ -295,6 +462,8 @@ def calculate_damage(
     
     if is_critical:
         messages.append("A critical hit!")
+
+    messages.extend(ability_msgs)
     
     return DamageResult(
         damage=damage,
@@ -363,9 +532,13 @@ async def start_battle(session: AsyncSession, battle: Battle, defender_pokemon_i
     )
     p2_poke = p2_pokemon.scalar_one()
     
-    # Create battle Pokemon
-    bp1 = create_battle_pokemon(p1_poke, p1_poke.species)
-    bp2 = create_battle_pokemon(p2_poke, p2_poke.species)
+    # Resolve real moves from DB for both Pokemon
+    p1_moves = await get_pokemon_moves_from_db(session, p1_poke, p1_poke.species)
+    p2_moves = await get_pokemon_moves_from_db(session, p2_poke, p2_poke.species)
+
+    # Create battle Pokemon with resolved moves
+    bp1 = create_battle_pokemon(p1_poke, p1_poke.species, resolved_moves=p1_moves)
+    bp2 = create_battle_pokemon(p2_poke, p2_poke.species, resolved_moves=p2_moves)
     
     # Determine who goes first based on speed
     p1_speed = calculate_stat(
@@ -576,6 +749,7 @@ class PveParticipant:
     sp_defense: int
     speed: int
     moves: list[dict]
+    ability: str = ""
 
 
 # NPC Trainer data — 8 Kanto gym leaders + Lance + Red
@@ -699,6 +873,10 @@ def build_pve_participant_from_species(
 
     moves = get_species_moves(t1, t2, level)
 
+    # Pick an ability for the wild/NPC Pokemon
+    abilities = species.abilities or []
+    ability = abilities[0] if abilities else ""
+
     return PveParticipant(
         name=species.name,
         level=level,
@@ -712,11 +890,12 @@ def build_pve_participant_from_species(
         sp_defense=sp_defense,
         speed=speed,
         moves=moves,
+        ability=ability.lower() if ability else "",
     )
 
 
 def build_pve_participant_from_pokemon(pokemon: Pokemon) -> PveParticipant:
-    """Build a PveParticipant from a real player Pokemon."""
+    """Build a PveParticipant from a real player Pokemon (sync fallback)."""
     species = pokemon.species
     t1 = species.type1.lower()
     t2 = species.type2.lower() if species.type2 else None
@@ -746,6 +925,44 @@ def build_pve_participant_from_pokemon(pokemon: Pokemon) -> PveParticipant:
         sp_defense=sp_defense,
         speed=speed,
         moves=moves,
+        ability=(pokemon.ability or "").lower(),
+    )
+
+
+async def build_pve_participant_from_pokemon_db(
+    session: AsyncSession, pokemon: Pokemon
+) -> PveParticipant:
+    """Build a PveParticipant using real DB moves when available."""
+    species = pokemon.species
+    t1 = species.type1.lower()
+    t2 = species.type2.lower() if species.type2 else None
+
+    hp = calculate_stat(species.base_hp, pokemon.iv_hp, pokemon.ev_hp, pokemon.level, is_hp=True)
+    attack = calculate_stat(species.base_attack, pokemon.iv_attack, pokemon.ev_attack, pokemon.level)
+    defense = calculate_stat(species.base_defense, pokemon.iv_defense, pokemon.ev_defense, pokemon.level)
+    sp_attack = calculate_stat(species.base_sp_attack, pokemon.iv_sp_attack, pokemon.ev_sp_attack, pokemon.level)
+    sp_defense = calculate_stat(species.base_sp_defense, pokemon.iv_sp_defense, pokemon.ev_sp_defense, pokemon.level)
+    speed = calculate_stat(species.base_speed, pokemon.iv_speed, pokemon.ev_speed, pokemon.level)
+
+    # Resolve real moves from DB
+    bp_moves = await get_pokemon_moves_from_db(session, pokemon, species)
+    moves = [{"name": m.name, "type": m.type, "power": m.power,
+              "accuracy": m.accuracy, "category": m.category} for m in bp_moves]
+
+    return PveParticipant(
+        name=pokemon.display_name,
+        level=pokemon.level,
+        type1=t1,
+        type2=t2,
+        hp=hp,
+        max_hp=hp,
+        attack=attack,
+        defense=defense,
+        sp_attack=sp_attack,
+        sp_defense=sp_defense,
+        speed=speed,
+        moves=moves,
+        ability=(pokemon.ability or "").lower(),
     )
 
 
@@ -765,26 +982,42 @@ def pve_calculate_damage(
         )
 
     level = attacker.level
+    move_type = move["type"]
+    move_category = move["category"]
 
-    if move["category"] == "physical":
+    if move_category == "physical":
         attack_stat = attacker.attack
         defense_stat = defender.defense
     else:
         attack_stat = attacker.sp_attack
         defense_stat = defender.sp_defense
 
-    # Base damage
-    base_damage = (((2 * level / 5 + 2) * move["power"] * attack_stat / defense_stat) / 50 + 2)
-
-    # STAB
-    move_type = move["type"]
-    stab = 1.5 if move_type in [attacker.type1, attacker.type2] else 1.0
-
     # Type effectiveness
     defender_types = [defender.type1]
     if defender.type2:
         defender_types.append(defender.type2)
     effectiveness = get_type_effectiveness(move_type, defender_types)
+
+    # Ability modifiers
+    effectiveness, attack_stat, defense_stat, ability_msgs = apply_ability_damage_modifier(
+        attacker_ability=attacker.ability,
+        defender_ability=defender.ability,
+        move_type=move_type,
+        move_category=move_category,
+        defender_types=defender_types,
+        effectiveness=effectiveness,
+        attack_stat=attack_stat,
+        defense_stat=defense_stat,
+        defender_hp=defender.hp,
+        defender_max_hp=defender.max_hp,
+    )
+
+    # Base damage
+    base_damage = (((2 * level / 5 + 2) * move["power"] * attack_stat / defense_stat) / 50 + 2)
+
+    # STAB — boosted by Adaptability
+    is_stab = move_type in [attacker.type1, attacker.type2]
+    stab = get_stab_multiplier(attacker.ability) if is_stab else 1.0
 
     # Critical hit
     is_critical = random.random() < 0.0625
@@ -799,12 +1032,21 @@ def pve_calculate_damage(
     if effectiveness == 0:
         damage = 0
 
+    # Sturdy check
+    if damage > 0:
+        damage, sturdy_msg = check_sturdy(
+            defender.ability, defender.hp, defender.max_hp, damage
+        )
+        if sturdy_msg:
+            ability_msgs.append(sturdy_msg)
+
     messages = [f"{attacker.name} used {move['name']}!"]
     eff_msg = get_effectiveness_message(effectiveness)
     if eff_msg:
         messages.append(eff_msg)
     if is_critical:
         messages.append("A critical hit!")
+    messages.extend(ability_msgs)
 
     return DamageResult(
         damage=damage,

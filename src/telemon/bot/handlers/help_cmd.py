@@ -37,6 +37,12 @@ HELP_MESSAGE = """
 /evolve [#] [item] - Evolve a Pokemon
 /pet [#] - Increase friendship (+5, doubled with Soothe Bell)
 
+<b>Moves</b>
+/moves [#] - View a Pokemon's known moves
+/learn [move] - Teach selected Pokemon a move
+/forget [move] - Forget a move from selected Pokemon
+/learnable [#] - See all learnable moves at current level
+
 <b>Battle</b>
 /duel @user - Challenge to PvP battle
 /battle wild - Fight a random wild Pokemon
@@ -303,6 +309,49 @@ Higher difficulty trainers give bigger multipliers!
 Select moves with inline buttons
 Type effectiveness, stats, STAB all apply
 /forfeit — End battle early
+""",
+    "moves": """
+<b>/moves [#]</b>
+
+View a Pokemon's known moves with full details.
+
+Shows: move name, type, power, accuracy, PP, category.
+
+<b>Example:</b> /moves
+<b>Example:</b> /moves 3
+
+<b>Related:</b>
+/learn [move] — Learn a new move
+/forget [move] — Forget a move
+/learnable — See available moves
+""",
+    "learn": """
+<b>/learn [move name]</b>
+
+Teach your selected Pokemon a new move.
+
+The Pokemon must be able to learn the move (species learnset) and be at a high enough level.
+Maximum 4 moves — use /forget first to make room.
+
+<b>Example:</b> /learn flamethrower
+""",
+    "forget": """
+<b>/forget [move name]</b>
+
+Forget a move from your selected Pokemon.
+Supports partial name matching.
+
+<b>Example:</b> /forget tackle
+""",
+    "learnable": """
+<b>/learnable [#]</b>
+Also: /movelist
+
+Show all moves a Pokemon can learn at its current level.
+Moves already known are marked with [Known].
+
+<b>Example:</b> /learnable
+<b>Example:</b> /learnable 5
 """,
 }
 

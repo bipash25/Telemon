@@ -137,11 +137,11 @@ async def cmd_daily(message: Message, session: AsyncSession, user: User) -> None
             from telemon.core.leveling import calculate_daily_xp, add_xp_to_pokemon, format_xp_message
 
             daily_xp = calculate_daily_xp(user.daily_streak)
-            xp_added, levels_gained = await add_xp_to_pokemon(
+            xp_added, levels_gained, learned_moves = await add_xp_to_pokemon(
                 session, str(sel_poke.id), daily_xp
             )
             if xp_added > 0:
-                daily_xp_text = "\n" + format_xp_message(sel_poke.display_name, xp_added, levels_gained)
+                daily_xp_text = "\n" + format_xp_message(sel_poke.display_name, xp_added, levels_gained, learned_moves)
 
     await session.commit()
 

@@ -197,6 +197,12 @@ async def callback_starter_selection(
 
     session.add(starter)
     user.selected_pokemon_id = str(starter.id)  # Convert UUID to string
+
+    # Assign initial moves based on species learnset
+    from telemon.core.moves import assign_starter_moves
+
+    await assign_starter_moves(session, starter)
+
     await session.commit()
 
     iv_total = sum(ivs.values())

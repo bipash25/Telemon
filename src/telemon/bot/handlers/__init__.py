@@ -10,6 +10,7 @@ from telemon.bot.handlers import (
     help_cmd,
     leaderboard,
     market,
+    moves,
     pokedex,
     pokemon,
     profile,
@@ -34,6 +35,7 @@ def register_all_handlers(dp: Dispatcher) -> None:
     # Pokemon handlers
     dp.include_router(catch.router)
     dp.include_router(pokemon.router)
+    dp.include_router(moves.router)
     dp.include_router(pokedex.router)
     dp.include_router(shinyhunt.router)
 

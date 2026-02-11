@@ -664,7 +664,7 @@ async def execute_trade(message: Message, session: AsyncSession, trade: Trade) -
         )
         trader = trader_result.scalar_one_or_none()
         if trader and trader.selected_pokemon_id:
-            xp_added, levels_gained = await add_xp_to_pokemon(
+            xp_added, levels_gained, learned_moves = await add_xp_to_pokemon(
                 session, trader.selected_pokemon_id, trade_xp
             )
             if xp_added > 0 and levels_gained:

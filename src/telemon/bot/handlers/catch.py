@@ -252,13 +252,19 @@ async def cmd_catch(message: Message, session: AsyncSession, user: User) -> None
             from telemon.core.leveling import calculate_catch_xp, add_xp_to_pokemon, format_xp_message
 
             catch_xp = calculate_catch_xp(new_pokemon.level, spawn.species.catch_rate)
-            xp_added, levels_gained = await add_xp_to_pokemon(
+            xp_added, levels_gained, learned_moves = await add_xp_to_pokemon(
                 session, str(sel_poke.id), catch_xp
             )
             if xp_added > 0:
-                xp_msg = "\n" + format_xp_message(sel_poke.display_name, xp_added, levels_gained)
+                xp_msg = "\n" + format_xp_message(sel_poke.display_name, xp_added, levels_gained, learned_moves)
 
     session.add(new_pokemon)
+
+    # Assign initial moves based on species learnset
+    from telemon.core.moves import assign_starter_moves
+
+    await assign_starter_moves(session, new_pokemon)
+
     await session.commit()
 
     # Update quest progress
