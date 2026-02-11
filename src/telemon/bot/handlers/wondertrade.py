@@ -278,6 +278,21 @@ async def do_wonder_trade(
             sent=poke.species.name,
             received=received.species.name,
         )
+
+        # DM notify the other user about the wonder trade match
+        try:
+            from telemon.core.notifications import notify_wonder_trade_match
+            await notify_wonder_trade_match(
+                bot=message.bot,
+                user_id=old_owner_id,
+                sent_name=received.species.name,  # What they sent
+                received_name=poke.species.name,   # What they got back
+                received_level=poke.level,
+                received_iv=poke.iv_percentage,
+                is_shiny=poke.is_shiny,
+            )
+        except Exception:
+            pass  # Best-effort DM
     else:
         # No match — deposit into pool
         await _deposit_pokemon(session, user, poke, message)

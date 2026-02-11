@@ -30,6 +30,8 @@ HELP_MESSAGE = """
 /nickname [name] - Rename selected Pokemon
 /favorite [#] - Toggle favorite
 /release [#] - Release a Pokemon
+/release duplicates - Bulk release duplicate Pokemon
+/release all [filters] - Bulk release with filters
 
 <b>Evolution & Training</b>
 /evolve [#] [item] - Evolve a Pokemon

@@ -858,6 +858,19 @@ async def market_buy(
         f"<i>Use /pokemon to see your new Pokemon!</i>"
     )
 
+    # DM notify seller about the sale
+    try:
+        from telemon.core.notifications import notify_market_sale
+        await notify_market_sale(
+            bot=message.bot,
+            seller_id=seller.telegram_id,
+            pokemon_name=pokemon.species.name,
+            price=listing.price,
+            buyer_name=user.display_name,
+        )
+    except Exception:
+        pass  # DM notification is best-effort
+
 
 async def market_cancel(
     message: Message, session: AsyncSession, user: User, args: list

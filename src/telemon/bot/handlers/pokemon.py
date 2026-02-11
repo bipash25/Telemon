@@ -331,6 +331,26 @@ SpA: {poke.iv_sp_attack} | SpD: {poke.iv_sp_defense} | Spe: {poke.iv_speed}
 
 <i>Caught {poke.caught_at.strftime('%Y-%m-%d')}</i>"""
 
+    # Try to send with Pokemon artwork image
+    try:
+        from aiogram.types import BufferedInputFile
+        from telemon.core.imaging import generate_spawn_image
+
+        image_data = await generate_spawn_image(
+            dex_number=poke.species.national_dex,
+            primary_type=poke.species.type1 or "normal",
+            shiny=poke.is_shiny,
+        )
+        if image_data:
+            photo = BufferedInputFile(
+                file=image_data.read(),
+                filename=f"info_{poke.species.national_dex}.jpg",
+            )
+            await message.answer_photo(photo=photo, caption=info)
+            return
+    except Exception:
+        pass  # Fall back to text-only
+
     await message.answer(info)
 
 
@@ -434,9 +454,20 @@ async def cmd_favorite(message: Message, session: AsyncSession, user: User) -> N
 
 @router.message(Command("release"))
 async def cmd_release(message: Message, session: AsyncSession, user: User) -> None:
-    """Handle /release command to release a Pokemon."""
+    """Handle /release command to release Pokemon (single, duplicates, or filtered)."""
     text = message.text or ""
     args = text.split()
+
+    # Subcommands: /release duplicates, /release all [filters]
+    if len(args) >= 2 and args[1].lower() in ("duplicates", "dups"):
+        await release_duplicates(message, session, user)
+        return
+
+    if len(args) >= 2 and args[1].lower() == "all":
+        # Parse filters from remaining args
+        filter_text = " ".join(args[2:]) if len(args) > 2 else ""
+        await release_filtered(message, session, user, filter_text)
+        return
 
     arg = args[1] if len(args) >= 2 else None
     poke = await resolve_pokemon(session, user, arg)
@@ -715,3 +746,219 @@ async def cmd_evolve(message: Message, session: AsyncSession, user: User) -> Non
                     lines.append(f"  High Friendship")
 
         await message.answer("\n".join(lines))
+
+
+async def release_duplicates(
+    message: Message, session: AsyncSession, user: User
+) -> None:
+    """Release duplicate Pokemon, keeping the best IV of each species.
+
+    Skips favorites, selected, on-market, and in-trade Pokemon.
+    """
+    result = await session.execute(
+        select(Pokemon)
+        .where(Pokemon.owner_id == user.telegram_id)
+        .order_by(Pokemon.species_id.asc())
+    )
+    all_pokemon = list(result.scalars().all())
+
+    if not all_pokemon:
+        await message.answer("You don't have any Pokemon!")
+        return
+
+    # Group by species_id
+    from collections import defaultdict
+    species_groups: dict[int, list[Pokemon]] = defaultdict(list)
+    for poke in all_pokemon:
+        species_groups[poke.species_id].append(poke)
+
+    to_release: list[Pokemon] = []
+    for species_id, pokes in species_groups.items():
+        if len(pokes) <= 1:
+            continue
+        # Sort by IV descending — keep the best
+        pokes.sort(key=lambda p: p.iv_percentage, reverse=True)
+        for poke in pokes[1:]:  # Skip the best one
+            # Skip protected Pokemon
+            if poke.is_favorite:
+                continue
+            if str(poke.id) == user.selected_pokemon_id:
+                continue
+            if poke.is_on_market:
+                continue
+            if poke.is_in_trade:
+                continue
+            if poke.is_shiny:
+                continue  # Never auto-release shinies
+            to_release.append(poke)
+
+    if not to_release:
+        await message.answer(
+            "No duplicates to release!\n"
+            "(Favorites, shinies, selected, and traded Pokemon are always kept)"
+        )
+        return
+
+    # Build confirmation
+    builder = InlineKeyboardBuilder()
+    count = len(to_release)
+    builder.button(text=f"Yes, release {count} Pokemon", callback_data=f"bulkrel:dups:{count}")
+    builder.button(text="Cancel", callback_data="bulkrel:cancel")
+    builder.adjust(1)
+
+    # Store release IDs in memory for the callback
+    _pending_bulk_releases[user.telegram_id] = [str(p.id) for p in to_release]
+
+    await message.answer(
+        f"<b>Release Duplicates</b>\n\n"
+        f"Found <b>{count}</b> duplicate Pokemon to release.\n"
+        f"(Keeping best IV of each species)\n\n"
+        f"<i>Favorites, shinies, selected, on-market, and in-trade Pokemon are always kept.</i>\n\n"
+        f"Are you sure?",
+        reply_markup=builder.as_markup(),
+    )
+
+
+async def release_filtered(
+    message: Message, session: AsyncSession, user: User, filter_text: str
+) -> None:
+    """Release Pokemon matching filters. Skips protected Pokemon."""
+    if not filter_text:
+        await message.answer(
+            "<b>Bulk Release</b>\n\n"
+            "Usage: /release all [filters]\n\n"
+            "<b>Filters:</b>\n"
+            "iv:0-50 — Release Pokemon with IV below 50%\n"
+            "gen:1 — Release Gen 1 Pokemon\n"
+            "type:normal — Release Normal type\n"
+            "name:rattata — Release by name\n\n"
+            "<b>Examples:</b>\n"
+            "/release all iv:0-30\n"
+            "/release all gen:1 iv:0-50\n\n"
+            "<i>Favorites, shinies, selected Pokemon are always kept.</i>"
+        )
+        return
+
+    # Parse filters
+    fargs = parse_pokemon_args(filter_text)
+
+    # Build query
+    query = (
+        select(Pokemon)
+        .where(Pokemon.owner_id == user.telegram_id)
+        .join(PokemonSpecies, Pokemon.species_id == PokemonSpecies.national_dex)
+    )
+
+    # Must have at least one filter to prevent accidental mass release
+    has_filter = False
+
+    if fargs["type"]:
+        query = query.where(
+            (PokemonSpecies.type1 == fargs["type"]) | (PokemonSpecies.type2 == fargs["type"])
+        )
+        has_filter = True
+    if fargs["gen"]:
+        query = query.where(PokemonSpecies.generation == fargs["gen"])
+        has_filter = True
+    if fargs["name"]:
+        query = query.where(PokemonSpecies.name_lower.contains(fargs["name"]))
+        has_filter = True
+
+    if not has_filter:
+        await message.answer("You must specify at least one filter (type:, gen:, name:, etc.).")
+        return
+
+    result = await session.execute(query)
+    candidates = list(result.scalars().all())
+
+    # Apply IV filter manually
+    to_release: list[Pokemon] = []
+    for poke in candidates:
+        # Skip protected
+        if poke.is_favorite:
+            continue
+        if str(poke.id) == user.selected_pokemon_id:
+            continue
+        if poke.is_on_market:
+            continue
+        if poke.is_in_trade:
+            continue
+        if poke.is_shiny:
+            continue
+        to_release.append(poke)
+
+    if not to_release:
+        await message.answer("No Pokemon match your filters (after excluding protected Pokemon).")
+        return
+
+    count = len(to_release)
+    builder = InlineKeyboardBuilder()
+    builder.button(text=f"Yes, release {count} Pokemon", callback_data=f"bulkrel:filt:{count}")
+    builder.button(text="Cancel", callback_data="bulkrel:cancel")
+    builder.adjust(1)
+
+    _pending_bulk_releases[user.telegram_id] = [str(p.id) for p in to_release]
+
+    filter_desc = []
+    if fargs["type"]:
+        filter_desc.append(f"type:{fargs['type']}")
+    if fargs["gen"]:
+        filter_desc.append(f"gen:{fargs['gen']}")
+    if fargs["name"]:
+        filter_desc.append(f"name:{fargs['name']}")
+
+    await message.answer(
+        f"<b>Bulk Release</b>\n\n"
+        f"Found <b>{count}</b> Pokemon matching [{', '.join(filter_desc)}]\n\n"
+        f"<i>Favorites, shinies, selected, on-market, and in-trade Pokemon are excluded.</i>\n\n"
+        f"Are you sure?",
+        reply_markup=builder.as_markup(),
+    )
+
+
+# In-memory store for pending bulk releases
+_pending_bulk_releases: dict[int, list[str]] = {}
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("bulkrel:"))
+async def callback_bulk_release(
+    callback: CallbackQuery, session: AsyncSession, user: User
+) -> None:
+    """Handle bulk release confirmation callbacks."""
+    if not callback.data:
+        return
+
+    action = callback.data.split(":")[1]
+
+    if action == "cancel":
+        _pending_bulk_releases.pop(user.telegram_id, None)
+        await callback.message.edit_text("Bulk release cancelled.")
+        await callback.answer()
+        return
+
+    # Get pending release IDs
+    pokemon_ids = _pending_bulk_releases.pop(user.telegram_id, None)
+    if not pokemon_ids:
+        await callback.message.edit_text("No pending release found. Try again.")
+        await callback.answer()
+        return
+
+    # Delete all matching Pokemon
+    released = 0
+    for pid in pokemon_ids:
+        result = await session.execute(
+            select(Pokemon)
+            .where(Pokemon.id == pid)
+            .where(Pokemon.owner_id == user.telegram_id)
+        )
+        poke = result.scalar_one_or_none()
+        if poke and not poke.is_favorite and not poke.is_shiny:
+            await session.delete(poke)
+            released += 1
+
+    await session.commit()
+
+    await callback.message.edit_text(
+        f"Released <b>{released}</b> Pokemon. Goodbye!"
+    )
+    await callback.answer(f"Released {released} Pokemon!")
