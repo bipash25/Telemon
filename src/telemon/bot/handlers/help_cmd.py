@@ -76,7 +76,11 @@ HELP_CATEGORIES = {
             "/battle npc - List NPC trainers\n"
             "/battle npc [name] - Fight a trainer\n"
             "/forfeit - End battle early\n\n"
-            "<i>Select moves with inline buttons during battle.</i>"
+            "<b>Mega Evolution</b>\n"
+            "/mega - Check selected Pokemon\n"
+            "/mega list - List all mega evolutions\n\n"
+            "<i>Give your Pokemon a mega stone (from /shop) and "
+            "press Mega Evolve during battle!</i>"
         ),
     },
     "trade": {

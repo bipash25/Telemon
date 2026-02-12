@@ -11,6 +11,7 @@ from telemon.bot.handlers import (
     help_cmd,
     leaderboard,
     market,
+    mega,
     moves,
     pokedex,
     pokemon,
@@ -42,6 +43,7 @@ def register_all_handlers(dp: Dispatcher) -> None:
 
     # Battle handlers
     dp.include_router(battle.router)
+    dp.include_router(mega.router)
 
     # Economy handlers
     dp.include_router(trade.router)

@@ -70,6 +70,55 @@ ALL_ITEMS: list[dict[str, Any]] = [
     # ── Special Items (IDs 301–302) ──
     {"id": 301, "name": "Shiny Charm",  "name_lower": "shiny charm",   "category": "special", "cost": 50000,  "sell_price": 25000, "is_consumable": False, "is_holdable": False, "description": "Triples your shiny odds! A must-have for shiny hunters."},
     {"id": 302, "name": "Oval Charm",   "name_lower": "oval charm",    "category": "special", "cost": 25000,  "sell_price": 12500, "is_consumable": False, "is_holdable": False, "description": "Increases egg hatch speed. (Coming soon)"},
+
+    # ── Mega Stones (IDs 401–448, 5000 TC) ──
+    {"id": 401, "name": "Venusaurite",     "name_lower": "venusaurite",     "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Venusaur in battle."},
+    {"id": 402, "name": "Charizardite X",  "name_lower": "charizardite x",  "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Charizard into Mega Charizard X."},
+    {"id": 403, "name": "Charizardite Y",  "name_lower": "charizardite y",  "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Charizard into Mega Charizard Y."},
+    {"id": 404, "name": "Blastoisinite",   "name_lower": "blastoisinite",   "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Blastoise in battle."},
+    {"id": 405, "name": "Beedrillite",     "name_lower": "beedrillite",     "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Beedrill in battle."},
+    {"id": 406, "name": "Pidgeotite",      "name_lower": "pidgeotite",      "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Pidgeot in battle."},
+    {"id": 407, "name": "Alakazite",       "name_lower": "alakazite",       "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Alakazam in battle."},
+    {"id": 408, "name": "Slowbronite",     "name_lower": "slowbronite",     "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Slowbro in battle."},
+    {"id": 409, "name": "Gengarite",       "name_lower": "gengarite",       "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Gengar in battle."},
+    {"id": 410, "name": "Kangaskhanite",   "name_lower": "kangaskhanite",   "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Kangaskhan in battle."},
+    {"id": 411, "name": "Pinsirite",       "name_lower": "pinsirite",       "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Pinsir in battle."},
+    {"id": 412, "name": "Gyaradosite",     "name_lower": "gyaradosite",     "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Gyarados in battle."},
+    {"id": 413, "name": "Aerodactylite",   "name_lower": "aerodactylite",   "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Aerodactyl in battle."},
+    {"id": 414, "name": "Mewtwonite X",    "name_lower": "mewtwonite x",    "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Mewtwo into Mega Mewtwo X."},
+    {"id": 415, "name": "Mewtwonite Y",    "name_lower": "mewtwonite y",    "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Mewtwo into Mega Mewtwo Y."},
+    {"id": 416, "name": "Ampharosite",     "name_lower": "ampharosite",     "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Ampharos in battle."},
+    {"id": 417, "name": "Steelixite",      "name_lower": "steelixite",      "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Steelix in battle."},
+    {"id": 418, "name": "Scizorite",       "name_lower": "scizorite",       "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Scizor in battle."},
+    {"id": 419, "name": "Heracronite",     "name_lower": "heracronite",     "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Heracross in battle."},
+    {"id": 420, "name": "Houndoominite",   "name_lower": "houndoominite",   "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Houndoom in battle."},
+    {"id": 421, "name": "Tyranitarite",    "name_lower": "tyranitarite",    "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Tyranitar in battle."},
+    {"id": 422, "name": "Sceptilite",      "name_lower": "sceptilite",      "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Sceptile in battle."},
+    {"id": 423, "name": "Blazikenite",     "name_lower": "blazikenite",     "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Blaziken in battle."},
+    {"id": 424, "name": "Swampertite",     "name_lower": "swampertite",     "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Swampert in battle."},
+    {"id": 425, "name": "Gardevoirite",    "name_lower": "gardevoirite",    "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Gardevoir in battle."},
+    {"id": 426, "name": "Sablenite",       "name_lower": "sablenite",       "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Sableye in battle."},
+    {"id": 427, "name": "Mawilite",        "name_lower": "mawilite",        "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Mawile in battle."},
+    {"id": 428, "name": "Aggronite",       "name_lower": "aggronite",       "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Aggron in battle."},
+    {"id": 429, "name": "Medichamite",     "name_lower": "medichamite",     "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Medicham in battle."},
+    {"id": 430, "name": "Manectite",       "name_lower": "manectite",       "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Manectric in battle."},
+    {"id": 431, "name": "Sharpedonite",    "name_lower": "sharpedonite",    "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Sharpedo in battle."},
+    {"id": 432, "name": "Cameruptite",     "name_lower": "cameruptite",     "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Camerupt in battle."},
+    {"id": 433, "name": "Altarianite",     "name_lower": "altarianite",     "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Altaria in battle."},
+    {"id": 434, "name": "Banettite",       "name_lower": "banettite",       "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Banette in battle."},
+    {"id": 435, "name": "Absolite",        "name_lower": "absolite",        "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Absol in battle."},
+    {"id": 436, "name": "Glalitite",       "name_lower": "glalitite",       "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Glalie in battle."},
+    {"id": 437, "name": "Salamencite",     "name_lower": "salamencite",     "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Salamence in battle."},
+    {"id": 438, "name": "Metagrossite",    "name_lower": "metagrossite",    "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Metagross in battle."},
+    {"id": 439, "name": "Latiasite",       "name_lower": "latiasite",       "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Latias in battle."},
+    {"id": 440, "name": "Latiosite",       "name_lower": "latiosite",       "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Latios in battle."},
+    {"id": 441, "name": "Lopunnite",       "name_lower": "lopunnite",       "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Lopunny in battle."},
+    {"id": 442, "name": "Garchompite",     "name_lower": "garchompite",     "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Garchomp in battle."},
+    {"id": 443, "name": "Lucarionite",     "name_lower": "lucarionite",     "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Lucario in battle."},
+    {"id": 444, "name": "Abomasite",       "name_lower": "abomasite",       "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Abomasnow in battle."},
+    {"id": 445, "name": "Galladite",       "name_lower": "galladite",       "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Gallade in battle."},
+    {"id": 446, "name": "Audinite",        "name_lower": "audinite",        "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Audino in battle."},
+    {"id": 447, "name": "Diancite",        "name_lower": "diancite",        "category": "mega_stone", "cost": 5000, "sell_price": 2500, "is_consumable": False, "is_holdable": True, "description": "Mega Evolves Diancie in battle."},
 ]
 
 
@@ -94,8 +143,14 @@ EVOLUTION_ITEM_IDS = {item["id"] for item in ALL_ITEMS if item["category"] == "e
 BATTLE_ITEM_IDS = {item["id"] for item in ALL_ITEMS if item["category"] == "battle"}
 UTILITY_ITEM_IDS = {item["id"] for item in ALL_ITEMS if item["category"] == "utility"}
 SPECIAL_ITEM_IDS = {item["id"] for item in ALL_ITEMS if item["category"] == "special"}
+MEGA_STONE_IDS = {item["id"] for item in ALL_ITEMS if item["category"] == "mega_stone"}
 
 # Linking Cord ID for convenience
 LINKING_CORD_ID = 29
 SOOTHE_BELL_ID = 30
 RARE_CANDY_ID = 201
+
+# Mega stone name → item dict (for quick lookup by held_item)
+MEGA_STONE_BY_NAME: dict[str, dict[str, Any]] = {
+    item["name_lower"]: item for item in ALL_ITEMS if item["category"] == "mega_stone"
+}

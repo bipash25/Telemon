@@ -36,6 +36,7 @@ def build_shop_message() -> str:
         ("Evolution Items", [i for i in ALL_ITEMS if i["category"] == "evolution" and 11 <= i["id"] <= 28]),
         ("Special Evolution", [i for i in ALL_ITEMS if i["category"] == "evolution" and i["id"] == 29]),
         ("Battle Items", [i for i in ALL_ITEMS if i["category"] == "battle"]),
+        ("Mega Stones", [i for i in ALL_ITEMS if i["category"] == "mega_stone"]),
         ("Utility Items", [i for i in ALL_ITEMS if i["category"] == "utility"]),
         ("Special Items", [i for i in ALL_ITEMS if i["category"] == "special"]),
     ]
@@ -250,7 +251,7 @@ async def cmd_inventory(message: Message, session: AsyncSession, user: User) -> 
     # Build message
     lines = ["<b>Your Inventory</b>\n"]
 
-    for category in ["Evolution", "Battle", "Utility", "Special", "Other"]:
+    for category in ["Evolution", "Battle", "Mega_Stone", "Utility", "Special", "Other"]:
         if category in categories:
             lines.append(f"\n<b>{category} Items</b>")
             for item_id, item_name, qty in categories[category]:
@@ -474,6 +475,35 @@ async def cmd_use(message: Message, session: AsyncSession, user: User) -> None:
         await message.answer(
             f"<b>{item.name} Equipped!</b>\n\n"
             f"{poke.display_name} is now holding {item.name}."
+        )
+        return
+
+    # ── Mega stones ──
+    if category == "mega_stone":
+        poke = await _resolve_use_target(session, user, pokemon_idx)
+        if poke is None:
+            await message.answer(
+                f"Please specify which Pokemon to give {item.name} to!\n"
+                f"Usage: /use {item_id} [pokemon#]"
+            )
+            return
+
+        # Check if the Pokemon can actually mega evolve with this stone
+        from telemon.core.forms import can_mega_evolve
+        mega = can_mega_evolve(poke.species_id, item.name_lower)
+        warning = ""
+        if not mega:
+            warning = (
+                f"\n\n<i>Note: {poke.display_name} cannot mega evolve "
+                f"with this stone. It may work on a different Pokemon.</i>"
+            )
+
+        poke.held_item = item.name
+        await session.commit()
+
+        await message.answer(
+            f"<b>{item.name} Equipped!</b>\n\n"
+            f"{poke.display_name} is now holding {item.name}.{warning}"
         )
         return
 
