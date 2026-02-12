@@ -1,8 +1,9 @@
 """Mega Evolution info command handler."""
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +20,54 @@ from telemon.logging import get_logger
 router = Router(name="mega")
 logger = get_logger(__name__)
 
+# Pagination for /mega list
+MEGA_PER_PAGE = 15
+
+
+def _build_mega_list_page(page: int) -> tuple[str, InlineKeyboardBuilder]:
+    """Build a page of the mega list with navigation keyboard."""
+    all_megas = get_all_mega_species()
+    total = len(all_megas)
+    total_pages = max(1, (total + MEGA_PER_PAGE - 1) // MEGA_PER_PAGE)
+    page = max(0, min(page, total_pages - 1))
+
+    start = page * MEGA_PER_PAGE
+    end = min(start + MEGA_PER_PAGE, total)
+    page_items = all_megas[start:end]
+
+    lines = [
+        f"<b>Mega Evolution List</b>  ({page + 1}/{total_pages})\n",
+    ]
+
+    for entry in page_items:
+        stone = entry.get("mega_stone_display")
+        if stone:
+            lines.append(
+                f"  #{entry['species_id']:04d} {entry['species_name']} → "
+                f"<b>{entry['form_name']}</b>\n"
+                f"         Stone: {stone}"
+            )
+        else:
+            lines.append(
+                f"  #{entry['species_id']:04d} {entry['species_name']} → "
+                f"<b>{entry['form_name']}</b>\n"
+                f"         Requires: Dragon Ascent"
+            )
+
+    lines.append(
+        "\n<i>Buy mega stones from /shop → Mega Stones.\n"
+        "Equip with /use [stone_id] [pokemon#].</i>"
+    )
+
+    builder = InlineKeyboardBuilder()
+    if page > 0:
+        builder.button(text="◀️ Prev", callback_data=f"megalist:{page - 1}")
+    if page < total_pages - 1:
+        builder.button(text="Next ▶️", callback_data=f"megalist:{page + 1}")
+    builder.adjust(2)
+
+    return "\n".join(lines), builder
+
 
 @router.message(Command("mega"))
 async def cmd_mega(message: Message, session: AsyncSession, user: User) -> None:
@@ -26,35 +75,10 @@ async def cmd_mega(message: Message, session: AsyncSession, user: User) -> None:
     text = message.text or ""
     args = text.split()
 
-    # /mega list — show all mega-capable species
+    # /mega list — show paginated mega list
     if len(args) >= 2 and args[1].lower() == "list":
-        all_megas = get_all_mega_species()
-
-        lines = [
-            "<b>Mega Evolution List</b>\n",
-            f"<b>{len(all_megas)}</b> mega evolutions available:\n",
-        ]
-
-        for entry in all_megas:
-            stone = entry.get("mega_stone_display")
-            if stone:
-                lines.append(
-                    f"  #{entry['species_id']:04d} {entry['species_name']} → "
-                    f"<b>{entry['form_name']}</b> ({stone})"
-                )
-            else:
-                lines.append(
-                    f"  #{entry['species_id']:04d} {entry['species_name']} → "
-                    f"<b>{entry['form_name']}</b> (Dragon Ascent)"
-                )
-
-        lines.append(
-            "\n<i>Buy mega stones from /shop and give them to "
-            "your Pokemon with /give [#] [stone name].\n"
-            "Then use Mega Evolve during battle!</i>"
-        )
-
-        await message.answer("\n".join(lines))
+        page_text, builder = _build_mega_list_page(0)
+        await message.answer(page_text, reply_markup=builder.as_markup())
         return
 
     # /mega (no args) — show info for selected Pokemon
@@ -135,7 +159,28 @@ async def cmd_mega(message: Message, session: AsyncSession, user: User) -> None:
             lines.append(
                 f"<i>Give your {poke.species.name} a "
                 f"{' or '.join(stone_names)} to mega evolve in battle.\n"
-                f"Use /give [#] [stone name] after buying from /shop.</i>"
+                f"Use /use [stone_id] [pokemon#] after buying from /shop.</i>"
             )
 
     await message.answer("\n".join(lines))
+
+
+@router.callback_query(F.data.startswith("megalist:"))
+async def callback_mega_list(callback: CallbackQuery) -> None:
+    """Handle mega list page navigation."""
+    data = (callback.data or "").split(":", 1)
+    if len(data) < 2:
+        await callback.answer()
+        return
+
+    try:
+        page = int(data[1])
+    except ValueError:
+        await callback.answer()
+        return
+
+    page_text, builder = _build_mega_list_page(page)
+    await callback.message.edit_text(
+        page_text, reply_markup=builder.as_markup()
+    )
+    await callback.answer()

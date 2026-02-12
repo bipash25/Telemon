@@ -1,8 +1,9 @@
 """Shop, inventory, and item usage handlers."""
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,40 +26,118 @@ logger = get_logger(__name__)
 PET_FRIENDSHIP_GAIN = 5
 SOOTHE_BELL_MULTIPLIER = 2
 
+# ──────────────────────────────────────────────
+# Shop category data (inline keyboard navigation)
+# ──────────────────────────────────────────────
 
-def build_shop_message() -> str:
-    """Build the shop display dynamically from the item catalog."""
-    lines = ["<b>Telemon Shop</b>\n"]
+SHOP_CATEGORIES: dict[str, dict] = {
+    "evo_stones": {
+        "emoji": "🪨",
+        "title": "Evo Stones",
+        "items": [i for i in ALL_ITEMS if i["category"] == "evolution" and i["id"] <= 10],
+    },
+    "evo_items": {
+        "emoji": "🔗",
+        "title": "Evo Items",
+        "items": [i for i in ALL_ITEMS if i["category"] == "evolution" and 11 <= i["id"] <= 29],
+    },
+    "battle": {
+        "emoji": "⚔️",
+        "title": "Battle",
+        "items": [i for i in ALL_ITEMS if i["category"] == "battle"],
+    },
+    "mega": {
+        "emoji": "🌀",
+        "title": "Mega Stones",
+        "items": [i for i in ALL_ITEMS if i["category"] == "mega_stone"],
+    },
+    "utility": {
+        "emoji": "🧪",
+        "title": "Utility",
+        "items": [i for i in ALL_ITEMS if i["category"] == "utility"],
+    },
+    "special": {
+        "emoji": "✨",
+        "title": "Special",
+        "items": [i for i in ALL_ITEMS if i["category"] == "special"],
+    },
+}
 
-    # Group items by category
-    categories = [
-        ("Evolution Stones", [i for i in ALL_ITEMS if i["category"] == "evolution" and i["id"] <= 10]),
-        ("Evolution Items", [i for i in ALL_ITEMS if i["category"] == "evolution" and 11 <= i["id"] <= 28]),
-        ("Special Evolution", [i for i in ALL_ITEMS if i["category"] == "evolution" and i["id"] == 29]),
-        ("Battle Items", [i for i in ALL_ITEMS if i["category"] == "battle"]),
-        ("Mega Stones", [i for i in ALL_ITEMS if i["category"] == "mega_stone"]),
-        ("Utility Items", [i for i in ALL_ITEMS if i["category"] == "utility"]),
-        ("Special Items", [i for i in ALL_ITEMS if i["category"] == "special"]),
-    ]
+SHOP_CATEGORY_ORDER = ["evo_stones", "evo_items", "battle", "mega", "utility", "special"]
 
-    for cat_name, items in categories:
-        if not items:
-            continue
-        lines.append(f"\n<b>{cat_name}</b>")
-        for item in items:
-            lines.append(f"  <code>{item['id']}</code> {item['name']} — {item['cost']:,} TC")
+SHOP_OVERVIEW = (
+    "<b>Telemon Shop</b>\n\n"
+    "Tap a category to browse items.\n\n"
+    "<i>Use /buy [id] [qty] to purchase.\n"
+    "Use /shopinfo [id] for item details.</i>"
+)
 
-    lines.append("\n<i>Use /buy [id] [qty] to purchase!</i>")
-    lines.append("<i>Example: /buy 201 5 (buy 5 Rare Candies)</i>")
-    lines.append("<i>Use /shopinfo [id] for item details.</i>")
 
+def _build_shop_keyboard() -> InlineKeyboardBuilder:
+    """Build the shop category selection keyboard."""
+    builder = InlineKeyboardBuilder()
+    for key in SHOP_CATEGORY_ORDER:
+        cat = SHOP_CATEGORIES[key]
+        count = len(cat["items"])
+        builder.button(
+            text=f"{cat['emoji']} {cat['title']} ({count})",
+            callback_data=f"shop:{key}",
+        )
+    builder.adjust(2)
+    return builder
+
+
+def _shop_back_keyboard() -> InlineKeyboardBuilder:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="◀️ Back to shop", callback_data="shop:back")
+    return builder
+
+
+def _build_category_text(key: str) -> str:
+    """Build the item list text for a shop category."""
+    cat = SHOP_CATEGORIES[key]
+    lines = [f"<b>{cat['emoji']} {cat['title']}</b>\n"]
+    for item in cat["items"]:
+        lines.append(f"  <code>{item['id']}</code> {item['name']} — {item['cost']:,} TC")
+    lines.append(f"\n<i>/buy [id] [qty] to purchase.  /shopinfo [id] for details.</i>")
     return "\n".join(lines)
 
 
 @router.message(Command("shop"))
 async def cmd_shop(message: Message) -> None:
     """Handle /shop command."""
-    await message.answer(build_shop_message())
+    keyboard = _build_shop_keyboard()
+    await message.answer(SHOP_OVERVIEW, reply_markup=keyboard.as_markup())
+
+
+@router.callback_query(F.data.startswith("shop:"))
+async def callback_shop(callback: CallbackQuery) -> None:
+    """Handle shop category selection."""
+    data = (callback.data or "").split(":", 1)
+    if len(data) < 2:
+        await callback.answer()
+        return
+
+    key = data[1]
+
+    if key == "back":
+        keyboard = _build_shop_keyboard()
+        await callback.message.edit_text(
+            SHOP_OVERVIEW, reply_markup=keyboard.as_markup()
+        )
+        await callback.answer()
+        return
+
+    cat = SHOP_CATEGORIES.get(key)
+    if not cat:
+        await callback.answer("Unknown category")
+        return
+
+    text = _build_category_text(key)
+    await callback.message.edit_text(
+        text, reply_markup=_shop_back_keyboard().as_markup()
+    )
+    await callback.answer()
 
 
 @router.message(Command("shopinfo", "iteminfo"))
@@ -251,10 +330,19 @@ async def cmd_inventory(message: Message, session: AsyncSession, user: User) -> 
     # Build message
     lines = ["<b>Your Inventory</b>\n"]
 
-    for category in ["Evolution", "Battle", "Mega_Stone", "Utility", "Special", "Other"]:
-        if category in categories:
-            lines.append(f"\n<b>{category} Items</b>")
-            for item_id, item_name, qty in categories[category]:
+    # Display order with clean names
+    category_display = [
+        ("Evolution", "Evolution"),
+        ("Battle", "Battle"),
+        ("Mega_Stone", "Mega Stone"),
+        ("Utility", "Utility"),
+        ("Special", "Special"),
+        ("Other", "Other"),
+    ]
+    for cat_key, cat_label in category_display:
+        if cat_key in categories:
+            lines.append(f"\n<b>{cat_label} Items</b>")
+            for item_id, item_name, qty in categories[cat_key]:
                 lines.append(f"  <code>{item_id}</code> {item_name} x{qty}")
 
     lines.append("\n<i>Use /use [item_id] [pokemon#] to use an item.</i>")
