@@ -33,6 +33,7 @@ from telemon.database.models.quest import UserQuest
 from telemon.database.models.wondertrade import WonderTrade
 from telemon.database.models.achievement import UserAchievement
 from telemon.database.models.breeding import DaycareSlot, PokemonEgg
+from telemon.database.models.team import Team
 
 # Alembic Config object
 config = context.config

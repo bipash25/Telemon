@@ -160,12 +160,33 @@ HELP_CATEGORIES = {
             "/rank - Your ranking"
         ),
     },
+    "team": {
+        "emoji": "🛡️",
+        "title": "Teams / Guilds",
+        "text": (
+            "<b>Teams / Guilds</b>\n\n"
+            "/team - View your team\n"
+            "/team create [name] [tag] - Create a team\n"
+            "/team join [tag] - Join a team\n"
+            "/team leave - Leave your team\n"
+            "/team members - View members\n"
+            "/team list - Browse all teams\n"
+            "/team info [tag] - View a team\n"
+            "/team kick/promote/demote - Reply to manage\n"
+            "/team transfer - Transfer leadership\n"
+            "/team disband - Delete your team\n"
+            "/team tag [new] - Change tag\n"
+            "/team desc [text] - Set description\n"
+            "/team policy [open/invite_only]\n\n"
+            "<i>Teams gain XP from catches, battles, and evolutions!</i>"
+        ),
+    },
 }
 
 # Ordered list for button layout
 CATEGORY_ORDER = [
     "start", "profile", "catch", "evolve", "battle", "trade",
-    "shop", "quest", "dex", "breed", "lb",
+    "shop", "quest", "dex", "breed", "lb", "team",
 ]
 
 
@@ -355,6 +376,29 @@ COMMAND_HELP = {
         "<b>/hatch</b>\n\n"
         "Hatch all eggs that have reached 0 steps remaining.\n"
         "Hatched Pokemon start at Lv.1 with 120 friendship."
+    ),
+    "team": (
+        "<b>/team [subcommand]</b>\n"
+        "Also: /guild, /t\n\n"
+        "Manage your team / guild.\n\n"
+        "<b>Subcommands:</b>\n"
+        "/team — View your team info\n"
+        "/team create [name] [tag] — Create a new team\n"
+        "/team join [tag] — Join a team\n"
+        "/team leave — Leave your team\n"
+        "/team members — View members (paginated)\n"
+        "/team list — Browse all teams\n"
+        "/team info [tag] — View another team\n"
+        "/team kick — Kick a member (reply)\n"
+        "/team promote — Promote to officer (reply)\n"
+        "/team demote — Demote officer (reply)\n"
+        "/team transfer — Transfer leadership (reply)\n"
+        "/team disband — Delete the team\n"
+        "/team tag [new] — Change tag (leader)\n"
+        "/team desc [text] — Set description\n"
+        "/team policy [open/invite_only] — Set join policy\n\n"
+        "Teams level up from member catches, battles, and evolutions.\n"
+        "Higher levels unlock more member slots."
     ),
 }
 

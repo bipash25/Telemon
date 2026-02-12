@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -45,6 +45,12 @@ class User(Base, TimestampMixin):
     total_evolutions: Mapped[int] = mapped_column(Integer, default=0)
     total_trades: Mapped[int] = mapped_column(Integer, default=0)
 
+    # Team membership
+    team_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("teams.id", ondelete="SET NULL"), nullable=True
+    )
+    team_role: Mapped[str | None] = mapped_column(String(20), nullable=True)  # leader / officer / member
+
     # User settings (JSON)
     settings: Mapped[dict] = mapped_column(JSONB, default=dict)
 
@@ -56,6 +62,7 @@ class User(Base, TimestampMixin):
     pokemon = relationship("Pokemon", back_populates="owner", lazy="dynamic")
     pokedex_entries = relationship("PokedexEntry", back_populates="user", lazy="dynamic")
     inventory_items = relationship("InventoryItem", back_populates="user", lazy="dynamic")
+    team = relationship("Team", back_populates="members", lazy="selectin")
     market_listings = relationship(
         "MarketListing",
         foreign_keys="MarketListing.seller_id",

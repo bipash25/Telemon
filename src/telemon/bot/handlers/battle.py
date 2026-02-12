@@ -477,6 +477,16 @@ async def callback_execute_move(
             await session.commit()
             lines.append(format_achievement_notification(battle_achs))
 
+        # Team XP hook for battle win
+        try:
+            if winner.team_id:
+                from telemon.core.teams import add_team_xp
+                xp_added, new_lvl, leveled = await add_team_xp(session, winner.team_id, "battle_win")
+                if leveled:
+                    lines.append(f"\nYour team leveled up to Lv.{new_lvl}!")
+        except Exception:
+            pass
+
         winner_name = winner.username or f"User {winner.telegram_id}"
         
         lines.extend([
@@ -1139,6 +1149,16 @@ async def _handle_pve_win(
     if battle_achs:
         await session.commit()
         lines.append(format_achievement_notification(battle_achs))
+
+    # Team XP hook for PvE battle win
+    try:
+        if user.team_id:
+            from telemon.core.teams import add_team_xp
+            xp_added, new_lvl, leveled = await add_team_xp(session, user.team_id, "battle_win")
+            if leveled:
+                lines.append(f"\nYour team leveled up to Lv.{new_lvl}!")
+    except Exception:
+        pass
 
     # Clean up
     del _pve_battles[user.telegram_id]

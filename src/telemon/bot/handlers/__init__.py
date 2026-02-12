@@ -21,6 +21,7 @@ from telemon.bot.handlers import (
     shop,
     spawn,
     start,
+    team,
     trade,
     wondertrade,
 )
@@ -61,6 +62,9 @@ def register_all_handlers(dp: Dispatcher) -> None:
 
     # Breeding
     dp.include_router(breeding.router)
+
+    # Teams / Guilds
+    dp.include_router(team.router)
 
     # Admin handlers
     dp.include_router(admin.router)

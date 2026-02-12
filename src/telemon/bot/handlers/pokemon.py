@@ -705,10 +705,21 @@ async def cmd_evolve(message: Message, session: AsyncSession, user: User) -> Non
             if new_achs:
                 await session.commit()
 
+            # Team XP hook for evolution
+            team_lvl_text = ""
+            try:
+                if user.team_id:
+                    from telemon.core.teams import add_team_xp
+                    xp_added, new_lvl, leveled = await add_team_xp(session, user.team_id, "evolve")
+                    if leveled:
+                        team_lvl_text = f"\nYour team leveled up to Lv.{new_lvl}!"
+            except Exception:
+                pass
+
             await message.answer(
                 f"<b>Congratulations!</b>\n\n"
                 f"{message_text}\n\n"
-                f"Your Pokemon is now a <b>{poke.species.name}</b>!{quest_text}{ach_text}"
+                f"Your Pokemon is now a <b>{poke.species.name}</b>!{quest_text}{ach_text}{team_lvl_text}"
             )
             
             logger.info(

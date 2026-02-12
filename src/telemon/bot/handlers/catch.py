@@ -366,6 +366,11 @@ async def cmd_catch(message: Message, session: AsyncSession, user: User) -> None
             await session.commit()
             ach_notifications = format_achievement_notification(all_new_achievements)
 
+        # Team XP hook
+        if user.team_id:
+            from telemon.core.teams import add_team_xp
+            await add_team_xp(session, user.team_id, "catch")
+
     except Exception as e:
         logger.error("Error in post-catch processing", error=str(e), exc_info=True)
         # We continue to send the success message even if secondary updates failed
