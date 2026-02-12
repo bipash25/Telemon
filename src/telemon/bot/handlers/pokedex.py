@@ -637,7 +637,7 @@ async def pokedex_search(
     if first_caught:
         first_caught_text = f"\n<b>First Caught:</b> {first_caught.strftime('%Y-%m-%d')}"
 
-    await message.answer(
+    caption = (
         f"📕 <b>Pokédex Entry #{species.national_dex:03d}</b>\n\n"
         f"<b>{species.name}</b>\n"
         f"Type: {types}\n"
@@ -648,6 +648,28 @@ async def pokedex_search(
         f"<b>Base Stats:</b> (BST: {species.base_stat_total})\n{stats_line}\n\n"
         f"<b>Your {species.name}:</b>\n{owned_text}"
     )
+
+    # Try to send with artwork image
+    try:
+        from aiogram.types import BufferedInputFile
+        from telemon.core.imaging import generate_spawn_image
+
+        image_data = await generate_spawn_image(
+            dex_number=species.national_dex,
+            primary_type=species.type1 or "normal",
+            shiny=False,
+        )
+        if image_data:
+            photo = BufferedInputFile(
+                file=image_data.read(),
+                filename=f"dex_{species.national_dex}.jpg",
+            )
+            await message.answer_photo(photo=photo, caption=caption)
+            return
+    except Exception:
+        pass  # Fall back to text-only
+
+    await message.answer(caption)
 
 
 async def pokedex_help(message: Message) -> None:

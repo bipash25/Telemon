@@ -1,434 +1,443 @@
-"""Help command handlers."""
+"""Help command handlers with category-based inline keyboard."""
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 router = Router(name="help")
 
 
-HELP_MESSAGE = """
-<b>Telemon Commands</b>
+# ---------------------------------------------------------------------------
+# Category definitions
+# ---------------------------------------------------------------------------
 
-<b>Getting Started</b>
-/start - Start the bot, pick a starter
-/help - Show this help message
-/help [command] - Detailed help for a command
+HELP_CATEGORIES = {
+    "start": {
+        "emoji": "🏠",
+        "title": "Getting Started",
+        "text": (
+            "<b>Getting Started</b>\n\n"
+            "/start - Start the bot, pick a starter\n"
+            "/help - Show help menu\n"
+            "/help [command] - Detailed help for a command"
+        ),
+    },
+    "profile": {
+        "emoji": "👤",
+        "title": "Profile & Economy",
+        "text": (
+            "<b>Profile & Economy</b>\n\n"
+            "/profile - View your trainer profile\n"
+            "/balance - Check your Telecoins\n"
+            "/daily - Claim daily reward (+friendship)\n"
+            "/gift @user [amount] - Send Telecoins"
+        ),
+    },
+    "catch": {
+        "emoji": "🔴",
+        "title": "Catching & Collection",
+        "text": (
+            "<b>Catching & Collection</b>\n\n"
+            "/catch [name] - Catch a wild Pokemon\n"
+            "/hint - Get a hint for the current spawn\n"
+            "/pokemon - List your Pokemon\n"
+            "/info [#] - View Pokemon details\n"
+            "/select [#] - Select active Pokemon\n"
+            "/nickname [name] - Rename selected\n"
+            "/favorite [#] - Toggle favorite\n"
+            "/release [#] - Release a Pokemon\n"
+            "/release duplicates - Bulk release duplicates\n"
+            "/release all [filters] - Bulk release with filters\n\n"
+            "<i>Filters: shiny, type:fire, gen:3, sort:iv</i>"
+        ),
+    },
+    "evolve": {
+        "emoji": "⚡",
+        "title": "Evolution & Training",
+        "text": (
+            "<b>Evolution & Training</b>\n\n"
+            "/evolve [#] [item] - Evolve a Pokemon\n"
+            "/pet [#] - Increase friendship\n\n"
+            "<b>Moves</b>\n"
+            "/moves [#] - View known moves\n"
+            "/learn [move] - Teach a move\n"
+            "/forget [move] - Forget a move\n"
+            "/learnable [#] - See learnable moves"
+        ),
+    },
+    "battle": {
+        "emoji": "⚔️",
+        "title": "Battle",
+        "text": (
+            "<b>Battle</b>\n\n"
+            "/duel @user - Challenge to PvP battle\n"
+            "/battle wild - Fight a wild Pokemon\n"
+            "/battle npc - List NPC trainers\n"
+            "/battle npc [name] - Fight a trainer\n"
+            "/forfeit - End battle early\n\n"
+            "<i>Select moves with inline buttons during battle.</i>"
+        ),
+    },
+    "trade": {
+        "emoji": "🤝",
+        "title": "Trading & Market",
+        "text": (
+            "<b>Trading</b>\n"
+            "/trade @user - Start a trade\n"
+            "/trade add/remove/confirm/cancel\n\n"
+            "<b>Market</b>\n"
+            "/market - Browse marketplace\n"
+            "/market sell [#] [price] - List for sale\n"
+            "/market buy [id] - Buy a listing\n\n"
+            "<b>Wonder Trade</b>\n"
+            "/wt [#] - Deposit for random swap\n"
+            "/wt status - Check pool status"
+        ),
+    },
+    "shop": {
+        "emoji": "🛒",
+        "title": "Shop & Items",
+        "text": (
+            "<b>Shop & Items</b>\n\n"
+            "/shop - View the shop\n"
+            "/buy [id] [qty] - Purchase an item\n"
+            "/use [id] [#] - Use item on Pokemon\n"
+            "/inventory - View your items\n"
+            "/shopinfo [id] - Item details"
+        ),
+    },
+    "quest": {
+        "emoji": "📋",
+        "title": "Quests & Achievements",
+        "text": (
+            "<b>Quests</b>\n"
+            "/quest - View daily & weekly quests\n"
+            "/quest claimall - Claim completed rewards\n\n"
+            "<b>Achievements</b>\n"
+            "/achievements - View your badges\n"
+            "/badges - Same as /achievements"
+        ),
+    },
+    "dex": {
+        "emoji": "📕",
+        "title": "Pokedex & Hunting",
+        "text": (
+            "<b>Pokedex & Hunting</b>\n\n"
+            "/pokedex - Pokedex overview\n"
+            "/pokedex list gen:3 - Browse by generation\n"
+            "/pokedex caught/missing/shiny\n"
+            "/pokedex [name/#] - Look up a Pokemon\n\n"
+            "/shinyhunt [name] - Set shiny target\n"
+            "/hunt status/stop/odds"
+        ),
+    },
+    "breed": {
+        "emoji": "🥚",
+        "title": "Breeding",
+        "text": (
+            "<b>Breeding</b>\n\n"
+            "/daycare - View daycare status\n"
+            "/daycare add [#] - Place Pokemon in daycare\n"
+            "/daycare remove [1/2] - Remove from slot\n"
+            "/breed - Produce an egg\n"
+            "/eggs - View eggs & hatch progress\n"
+            "/hatch - Hatch ready eggs\n\n"
+            "<i>Steps decrease from group messages.</i>"
+        ),
+    },
+    "lb": {
+        "emoji": "🏆",
+        "title": "Leaderboards",
+        "text": (
+            "<b>Leaderboards</b>\n\n"
+            "/leaderboard - View rankings\n"
+            "/lb catches/wealth/pokedex/shiny/battles/rating/group\n"
+            "/rank - Your ranking"
+        ),
+    },
+}
 
-<b>Profile & Economy</b>
-/profile - View your trainer profile
-/balance - Check your Telecoins
-/daily - Claim daily reward (+friendship)
-/gift @user [amount] - Send Telecoins
+# Ordered list for button layout
+CATEGORY_ORDER = [
+    "start", "profile", "catch", "evolve", "battle", "trade",
+    "shop", "quest", "dex", "breed", "lb",
+]
 
-<b>Catching & Collection</b>
-/catch [name] - Catch a wild Pokemon
-/hint - Get a hint for the current spawn
-/pokemon - List your Pokemon (filters: shiny, type:fire, gen:3, sort:iv)
-/info [#] - View Pokemon details
-/select [#] - Select active Pokemon
-/nickname [name] - Rename selected Pokemon
-/favorite [#] - Toggle favorite
-/release [#] - Release a Pokemon
-/release duplicates - Bulk release duplicate Pokemon
-/release all [filters] - Bulk release with filters
 
-<b>Evolution & Training</b>
-/evolve [#] [item] - Evolve a Pokemon
-/pet [#] - Increase friendship (+5, doubled with Soothe Bell)
-
-<b>Moves</b>
-/moves [#] - View a Pokemon's known moves
-/learn [move] - Teach selected Pokemon a move
-/forget [move] - Forget a move from selected Pokemon
-/learnable [#] - See all learnable moves at current level
-
-<b>Battle</b>
-/duel @user - Challenge to PvP battle
-/battle wild - Fight a random wild Pokemon
-/battle npc - List NPC trainers (gym leaders)
-/battle npc [name] - Fight a specific trainer
-
-<b>Trading</b>
-/trade @user - Start a trade
-/trade add/remove/confirm/cancel
-
-<b>Market</b>
-/market - Browse marketplace
-/market sell [#] [price] - List for sale
-/market buy [id] - Buy a listing
-
-<b>Shop & Items</b>
-/shop - View the shop (evolution items, battle items, etc.)
-/buy [id] [qty] - Purchase an item
-/use [id] [#] - Use an item on a Pokemon
-/inventory - View your items
-/shopinfo [id] - Item details
-
-<b>Quests</b>
-/quest - View daily & weekly quests
-/quest claimall - Claim completed quest rewards
-
-<b>Wonder Trade</b>
-/wt [pokemon#] - Deposit for random swap
-/wt status - Check pool status
-
-<b>Pokedex & Hunting</b>
-/pokedex - Pokedex overview (with gen breakdown)
-/pokedex list gen:3 - Browse by generation
-/pokedex caught/missing/shiny
-/shinyhunt [name] - Set shiny target
-/hunt status/stop/odds
-
-<b>Leaderboards</b>
-/leaderboard - View rankings
-/lb catches/wealth/pokedex/shiny/battles/rating/group
-/rank - Your ranking
-
-<b>Achievements</b>
-/achievements - View your achievement progress
-/badges - Same as /achievements
-
-<b>Breeding</b>
-/daycare - View daycare status
-/daycare add [#] - Place Pokemon in daycare
-/daycare remove [1/2] - Remove from daycare slot
-/breed - Produce an egg (needs 2 compatible Pokemon)
-/eggs - View your eggs and hatch progress
-/hatch - Hatch ready eggs
-
-<b>Admin</b> (Group admins only)
-/settings - Group settings
-/spawn - Force a spawn
-/addspawner @user - Grant spawn permissions
-/removespawner @user - Remove permissions
-
-<i>Most commands work with index numbers (/info 3) or selected Pokemon (/info)</i>
-"""
-
+# ---------------------------------------------------------------------------
+# Detailed per-command help (unchanged from before)
+# ---------------------------------------------------------------------------
 
 COMMAND_HELP = {
-    "catch": """
-<b>/catch [pokemon_name]</b>
-Also: /c
-
-Catch a wild Pokemon that has spawned in the chat.
-You must type the correct name of the Pokemon.
-
-<b>Example:</b> /catch pikachu
-""",
-    "pokemon": """
-<b>/pokemon</b>
-Also: /p
-
-View your Pokemon collection with filters and sorting.
-
-<b>Filters (both styles work):</b>
-shiny or --shiny — Show only shinies
-legendary or --legendary — Show legendaries
-name:char or --name char — Search by name
-type:fire or --type fire — Filter by type
-gen:3 or --gen 3 — Filter by generation
-fav or --favorites — Show only favorites
-
-<b>Sorting:</b>
-sort:iv — Sort by IV percentage
-sort:level — Sort by level
-sort:dex — Sort by Pokedex number
-sort:name — Sort alphabetically
-
-<b>Example:</b> /pokemon shiny type:fire sort:iv
-<b>Example:</b> /pokemon gen:1 sort:dex
-""",
-    "evolve": """
-<b>/evolve [#] [item name]</b>
-
-Evolve a Pokemon. Works with index number or selected Pokemon.
-
-<b>Evolution Types:</b>
-Level-up: Just reach the required level, then /evolve
-Item: /evolve 1 fire stone (uses and consumes the item)
-Trade: /evolve 1 linking cord (uses Linking Cord from shop)
-Friendship: Raise friendship to 220+ with /pet, then /evolve
-
-<b>Example:</b> /evolve 1
-<b>Example:</b> /evolve 1 thunder stone
-<b>Example:</b> /evolve linking cord (on selected Pokemon)
-""",
-    "trade": """
-<b>/trade @user</b>
-
-Start a trade with another user.
-
-<b>Trade Commands:</b>
-/trade add [#] — Add Pokemon
-/trade add coins [amount] — Add Telecoins
-/trade remove [#] — Remove Pokemon
-/trade confirm — Confirm your side
-/trade cancel — Cancel the trade
-
-Both users must confirm for trade to complete.
-Trade evolutions trigger automatically!
-""",
-    "market": """
-<b>/market search [filters]</b>
-
-Browse the global Pokemon marketplace.
-
-<b>Filters:</b>
---name [text] — Search by name
---type [type] — Filter by type
---shiny — Shinies only
---legendary — Legendaries only
---iv [min]-[max] — IV percentage range
---level [min]-[max] — Level range
---price [min]-[max] — Price range
-
-<b>Example:</b> /market search --name charizard --shiny
-""",
-    "quest": """
-<b>/quest</b>
-Also: /quests, /q
-
-View and manage your daily & weekly quests.
-
-<b>Commands:</b>
-/quest — View all active quests with progress
-/quest claimall — Claim all completed quest rewards
-/quest help — Detailed quest information
-
-<b>Quest Types:</b>
-- Catch Pokemon (general or by type)
-- Win battles, evolve, trade, pet
-- Sell on market, use items, claim daily
-
-Daily quests (3) reset at midnight UTC.
-Weekly quests (2) reset Monday midnight UTC.
-""",
-    "shop": """
-<b>/shop</b>
-
-Browse the item shop.
-
-<b>Item Categories:</b>
-Evolution Stones (500 TC) — Fire, Water, Thunder, etc.
-Evolution Items (1000-1500 TC) — Metal Coat, Dubious Disc, etc.
-Linking Cord (3000 TC) — Evolve trade Pokemon without trading!
-Soothe Bell (2000 TC) — Doubles friendship gains
-Battle Items — Leftovers, Choice Band, Life Orb, etc.
-Utility — Rare Candy (200 TC), Incense, XP Boost
-Special — Shiny Charm (50,000 TC), Oval Charm
-
-/buy [id] [qty] — Purchase items
-/shopinfo [id] — View item details
-/use [id] [#] — Use item on Pokemon
-""",
-    "gift": """
-<b>/gift @user [amount]</b>
-Also: /give, /send
-
-Send Telecoins to another trainer.
-
-<b>Usage:</b>
-/gift @friend 500 — Send 500 TC to @friend
-Reply to a message + /gift 500 — Send to that user
-
-Maximum: 1,000,000 TC per transfer.
-""",
-    "pet": """
-<b>/pet [#]</b>
-
-Pet your Pokemon to increase its friendship.
-
-Base gain: +5 friendship per pet
-With Soothe Bell: +10 friendship per pet
-
-Friendship is needed for certain evolutions (Eevee -> Espeon, Riolu -> Lucario, etc.)
-Max friendship: 255
-
-<b>Other friendship sources:</b>
-/daily — +5 to selected Pokemon
-Catching Pokemon — +1 to selected Pokemon  
-Rare Candy — +3 per use
-""",
-    "wondertrade": """
-<b>/wt [pokemon#]</b>
-Also: /wondertrade
-
-Deposit a Pokemon and receive a random one from another trainer!
-
-<b>Commands:</b>
-/wt [pokemon#] — Deposit a Pokemon for trade
-/wt status — Check pool status & your pending trade
-/wt help — Detailed help
-
-<b>How it works:</b>
-1. Use /wt [number] to deposit a Pokemon
-2. If someone is waiting, you swap instantly!
-3. If not, your Pokemon waits for the next trader
-
-<b>Rules:</b>
-- 1 Pokemon in the pool at a time
-- Favorites & selected Pokemon can't be traded
-- 5 minute cooldown between trades
-""",
-    "achievements": """
-<b>/achievements</b>
-Also: /badges, /ach
-
-View your achievement progress across all categories.
-
-<b>Categories:</b>
-Catching — Catch milestones (1, 10, 50, 100, 500, 1000)
-Shiny — Shiny catch milestones (1, 10, 50)
-Pokedex — Species registration milestones (10, 50, 151, 500, 1025)
-Evolution — Evolution milestones (1, 10, 50)
-Battle — Battle win milestones (1, 10, 50, 100)
-Trading — Trade milestones (1, 10, 50)
-Daily Streak — Streak milestones (3, 7, 14, 30 days)
-Special — Perfect IV, Legendary, Mythical catches
-Wonder Trade — Wonder Trade milestones (10)
-
-Each achievement grants a TC reward when unlocked.
-""",
-    "battle": """
-<b>/battle</b>
-Also: /duel
-
-Battle other trainers or fight wild Pokemon and NPC trainers!
-
-<b>PvP:</b>
-/duel @username — Challenge a player to a 1v1 battle
-
-<b>PvE - Wild:</b>
-/battle wild — Fight a random wild Pokemon
-Earn XP and Telecoins. Wild level matches yours (+-5).
-
-<b>PvE - NPC Trainers:</b>
-/battle npc — List all available NPC trainers
-/battle npc brock — Fight Gym Leader Brock
-/battle npc lance — Fight Elite Four Lance
-/battle npc red — Fight Champion Red
-
-NPC trainers scale with your level and give bonus rewards.
-Higher difficulty trainers give bigger multipliers!
-
-<b>During Battle:</b>
-Select moves with inline buttons
-Type effectiveness, stats, STAB all apply
-/forfeit — End battle early
-""",
-    "moves": """
-<b>/moves [#]</b>
-
-View a Pokemon's known moves with full details.
-
-Shows: move name, type, power, accuracy, PP, category.
-
-<b>Example:</b> /moves
-<b>Example:</b> /moves 3
-
-<b>Related:</b>
-/learn [move] — Learn a new move
-/forget [move] — Forget a move
-/learnable — See available moves
-""",
-    "learn": """
-<b>/learn [move name]</b>
-
-Teach your selected Pokemon a new move.
-
-The Pokemon must be able to learn the move (species learnset) and be at a high enough level.
-Maximum 4 moves — use /forget first to make room.
-
-<b>Example:</b> /learn flamethrower
-""",
-    "forget": """
-<b>/forget [move name]</b>
-
-Forget a move from your selected Pokemon.
-Supports partial name matching.
-
-<b>Example:</b> /forget tackle
-""",
-    "learnable": """
-<b>/learnable [#]</b>
-Also: /movelist
-
-Show all moves a Pokemon can learn at its current level.
-Moves already known are marked with [Known].
-
-<b>Example:</b> /learnable
-<b>Example:</b> /learnable 5
-""",
-    "daycare": """
-<b>/daycare</b>
-
-Manage your Pokemon daycare for breeding.
-
-<b>Commands:</b>
-/daycare — View daycare status & compatibility
-/daycare add [#] — Place a Pokemon in daycare (by index)
-/daycare add — Place your selected Pokemon
-/daycare remove [1/2] — Remove from slot 1 or 2
-
-You can have up to 2 Pokemon in the daycare at a time.
-""",
-    "breed": """
-<b>/breed</b>
-
-Attempt to breed the two Pokemon in your daycare.
-
-<b>Requirements:</b>
-- 2 Pokemon in daycare
-- Compatible egg groups (or one is Ditto)
-- One male + one female (or Ditto + anything)
-- Not in "Undiscovered" egg group
-
-<b>Egg Details:</b>
-- 3 IVs inherited from parents, rest random
-- Species = base form of mother's line
-- Shiny chance: 1/4096
-- Max 6 eggs at a time
-
-Steps decrease with group messages. Use /hatch when ready!
-""",
-    "eggs": """
-<b>/eggs</b>
-
-View all your Pokemon eggs with hatch progress.
-
-Each egg shows:
-- Species, IV percentage
-- Progress bar & steps remaining
-- Ready status
-
-Steps are added automatically when you chat in groups.
-""",
-    "hatch": """
-<b>/hatch</b>
-
-Hatch all eggs that have reached 0 steps remaining.
-
-Hatched Pokemon:
-- Start at Level 1
-- Have 120 base friendship (higher than caught)
-- Inherit 3 IVs from parents
-- Get starter moves assigned automatically
-""",
+    "catch": (
+        "<b>/catch [pokemon_name]</b>\n"
+        "Also: /c\n\n"
+        "Catch a wild Pokemon that has spawned in the chat.\n"
+        "You must type the correct name of the Pokemon.\n\n"
+        "<b>Example:</b> /catch pikachu"
+    ),
+    "pokemon": (
+        "<b>/pokemon</b>\n"
+        "Also: /p\n\n"
+        "View your Pokemon collection with filters and sorting.\n\n"
+        "<b>Filters (both styles work):</b>\n"
+        "shiny or --shiny — Show only shinies\n"
+        "legendary or --legendary — Show legendaries\n"
+        "name:char or --name char — Search by name\n"
+        "type:fire or --type fire — Filter by type\n"
+        "gen:3 or --gen 3 — Filter by generation\n"
+        "fav or --favorites — Show only favorites\n\n"
+        "<b>Sorting:</b>\n"
+        "sort:iv — Sort by IV percentage\n"
+        "sort:level — Sort by level\n"
+        "sort:dex — Sort by Pokedex number\n"
+        "sort:name — Sort alphabetically\n\n"
+        "<b>Example:</b> /pokemon shiny type:fire sort:iv"
+    ),
+    "evolve": (
+        "<b>/evolve [#] [item name]</b>\n\n"
+        "Evolve a Pokemon. Works with index number or selected Pokemon.\n\n"
+        "<b>Evolution Types:</b>\n"
+        "Level-up: Just reach the required level, then /evolve\n"
+        "Item: /evolve 1 fire stone (uses and consumes the item)\n"
+        "Trade: /evolve 1 linking cord (uses Linking Cord from shop)\n"
+        "Friendship: Raise friendship to 220+ with /pet, then /evolve\n\n"
+        "<b>Example:</b> /evolve 1\n"
+        "<b>Example:</b> /evolve 1 thunder stone"
+    ),
+    "trade": (
+        "<b>/trade @user</b>\n\n"
+        "Start a trade with another user.\n\n"
+        "<b>Trade Commands:</b>\n"
+        "/trade add [#] — Add Pokemon\n"
+        "/trade add coins [amount] — Add Telecoins\n"
+        "/trade remove [#] — Remove Pokemon\n"
+        "/trade confirm — Confirm your side\n"
+        "/trade cancel — Cancel the trade\n\n"
+        "Both users must confirm for trade to complete.\n"
+        "Trade evolutions trigger automatically!"
+    ),
+    "market": (
+        "<b>/market search [filters]</b>\n\n"
+        "Browse the global Pokemon marketplace.\n\n"
+        "<b>Filters:</b>\n"
+        "--name [text] — Search by name\n"
+        "--type [type] — Filter by type\n"
+        "--shiny — Shinies only\n"
+        "--legendary — Legendaries only\n"
+        "--iv [min]-[max] — IV percentage range\n\n"
+        "<b>Example:</b> /market search --name charizard --shiny"
+    ),
+    "quest": (
+        "<b>/quest</b>\n"
+        "Also: /quests, /q\n\n"
+        "View and manage your daily & weekly quests.\n\n"
+        "/quest — View all active quests with progress\n"
+        "/quest claimall — Claim all completed quest rewards\n\n"
+        "Daily quests (3) reset at midnight UTC.\n"
+        "Weekly quests (2) reset Monday midnight UTC."
+    ),
+    "shop": (
+        "<b>/shop</b>\n\n"
+        "Browse the item shop.\n\n"
+        "<b>Item Categories:</b>\n"
+        "Evolution Stones (500 TC)\n"
+        "Evolution Items (1000-1500 TC)\n"
+        "Linking Cord (3000 TC)\n"
+        "Soothe Bell (2000 TC)\n"
+        "Battle Items — Leftovers, Choice Band, etc.\n"
+        "Utility — Rare Candy (200 TC), Incense\n"
+        "Special — Shiny Charm (50,000 TC)\n\n"
+        "/buy [id] [qty] — Purchase items\n"
+        "/shopinfo [id] — View item details\n"
+        "/use [id] [#] — Use item on Pokemon"
+    ),
+    "gift": (
+        "<b>/gift @user [amount]</b>\n"
+        "Also: /give, /send\n\n"
+        "Send Telecoins to another trainer.\n\n"
+        "/gift @friend 500 — Send 500 TC\n"
+        "Reply to a message + /gift 500 — Send to that user\n\n"
+        "Maximum: 1,000,000 TC per transfer."
+    ),
+    "pet": (
+        "<b>/pet [#]</b>\n\n"
+        "Pet your Pokemon to increase its friendship.\n\n"
+        "Base gain: +5 friendship per pet\n"
+        "With Soothe Bell: +10 per pet\n\n"
+        "Friendship is needed for certain evolutions.\n"
+        "Max friendship: 255"
+    ),
+    "wondertrade": (
+        "<b>/wt [pokemon#]</b>\n"
+        "Also: /wondertrade\n\n"
+        "Deposit a Pokemon and receive a random one from another trainer!\n\n"
+        "/wt [pokemon#] — Deposit\n"
+        "/wt status — Check pool status\n\n"
+        "1 Pokemon in the pool at a time.\n"
+        "5 minute cooldown between trades."
+    ),
+    "achievements": (
+        "<b>/achievements</b>\n"
+        "Also: /badges, /ach\n\n"
+        "View your achievement progress.\n\n"
+        "<b>Categories:</b> Catching, Shiny, Pokedex, Evolution, Battle, "
+        "Trading, Daily Streak, Special, Wonder Trade\n\n"
+        "Each achievement grants a TC reward when unlocked."
+    ),
+    "battle": (
+        "<b>/battle</b>\n"
+        "Also: /duel\n\n"
+        "<b>PvP:</b> /duel @username\n\n"
+        "<b>PvE - Wild:</b> /battle wild\n"
+        "Earn XP and Telecoins.\n\n"
+        "<b>PvE - NPC:</b> /battle npc [name]\n"
+        "Fight gym leaders and champions.\n\n"
+        "<b>During Battle:</b>\n"
+        "Select moves with inline buttons.\n"
+        "/forfeit — End battle early."
+    ),
+    "moves": (
+        "<b>/moves [#]</b>\n\n"
+        "View a Pokemon's known moves with full details.\n\n"
+        "<b>Related:</b>\n"
+        "/learn [move] — Learn a new move\n"
+        "/forget [move] — Forget a move\n"
+        "/learnable — See available moves"
+    ),
+    "learn": (
+        "<b>/learn [move name]</b>\n\n"
+        "Teach your selected Pokemon a new move.\n"
+        "Maximum 4 moves — use /forget first to make room.\n\n"
+        "<b>Example:</b> /learn flamethrower"
+    ),
+    "forget": (
+        "<b>/forget [move name]</b>\n\n"
+        "Forget a move from your selected Pokemon.\n"
+        "Supports partial name matching.\n\n"
+        "<b>Example:</b> /forget tackle"
+    ),
+    "learnable": (
+        "<b>/learnable [#]</b>\n"
+        "Also: /movelist\n\n"
+        "Show all moves a Pokemon can learn at its current level.\n"
+        "Moves already known are marked with [Known]."
+    ),
+    "daycare": (
+        "<b>/daycare</b>\n\n"
+        "Manage your Pokemon daycare for breeding.\n\n"
+        "/daycare — View daycare status & compatibility\n"
+        "/daycare add [#] — Place a Pokemon in daycare\n"
+        "/daycare remove [1/2] — Remove from slot\n\n"
+        "You can have up to 2 Pokemon in the daycare at a time."
+    ),
+    "breed": (
+        "<b>/breed</b>\n\n"
+        "Attempt to breed the two Pokemon in your daycare.\n\n"
+        "<b>Requirements:</b>\n"
+        "- 2 Pokemon in daycare\n"
+        "- Compatible egg groups (or one is Ditto)\n"
+        "- One male + one female (or Ditto + anything)\n\n"
+        "3 IVs inherited from parents. Max 6 eggs.\n"
+        "Steps decrease with group messages."
+    ),
+    "eggs": (
+        "<b>/eggs</b>\n\n"
+        "View all your Pokemon eggs with hatch progress.\n"
+        "Steps are added automatically when you chat in groups."
+    ),
+    "hatch": (
+        "<b>/hatch</b>\n\n"
+        "Hatch all eggs that have reached 0 steps remaining.\n"
+        "Hatched Pokemon start at Lv.1 with 120 friendship."
+    ),
 }
 
 
+# ---------------------------------------------------------------------------
+# Build the main help keyboard
+# ---------------------------------------------------------------------------
+
+def build_help_keyboard() -> InlineKeyboardBuilder:
+    """Build the category selection keyboard."""
+    builder = InlineKeyboardBuilder()
+    for key in CATEGORY_ORDER:
+        cat = HELP_CATEGORIES[key]
+        builder.button(
+            text=f"{cat['emoji']} {cat['title']}",
+            callback_data=f"help:{key}",
+        )
+    builder.adjust(2)  # 2 buttons per row
+    return builder
+
+
+HELP_OVERVIEW = (
+    "<b>Telemon Help</b>\n\n"
+    "Tap a category below to see its commands.\n"
+    "Use <code>/help [command]</code> for detailed help on any command.\n\n"
+    "<i>Most commands work with index numbers (/info 3) or selected Pokemon (/info).</i>"
+)
+
+
+# ---------------------------------------------------------------------------
+# Handlers
+# ---------------------------------------------------------------------------
+
 @router.message(Command("help"))
 async def cmd_help(message: Message) -> None:
-    """Handle /help command."""
+    """Handle /help command — show category keyboard or detailed help."""
     args = message.text.split() if message.text else []
 
     if len(args) > 1:
-        # Help for specific command
         command = args[1].lower().lstrip("/")
         if command in COMMAND_HELP:
             await message.answer(COMMAND_HELP[command])
             return
+        # Try matching to a category
+        if command in HELP_CATEGORIES:
+            await message.answer(
+                HELP_CATEGORIES[command]["text"],
+                reply_markup=_back_keyboard().as_markup(),
+            )
+            return
 
-    await message.answer(HELP_MESSAGE)
+    keyboard = build_help_keyboard()
+    await message.answer(HELP_OVERVIEW, reply_markup=keyboard.as_markup())
+
+
+@router.callback_query(F.data.startswith("help:"))
+async def callback_help(callback: CallbackQuery) -> None:
+    """Handle help category selection."""
+    data = callback.data.split(":", 1)
+    if len(data) < 2:
+        await callback.answer()
+        return
+
+    key = data[1]
+
+    if key == "back":
+        keyboard = build_help_keyboard()
+        await callback.message.edit_text(
+            HELP_OVERVIEW, reply_markup=keyboard.as_markup()
+        )
+        await callback.answer()
+        return
+
+    cat = HELP_CATEGORIES.get(key)
+    if not cat:
+        await callback.answer("Unknown category")
+        return
+
+    await callback.message.edit_text(
+        cat["text"],
+        reply_markup=_back_keyboard().as_markup(),
+    )
+    await callback.answer()
+
+
+def _back_keyboard() -> InlineKeyboardBuilder:
+    """Build a keyboard with just a Back button."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="◀️ Back to categories", callback_data="help:back")
+    return builder
