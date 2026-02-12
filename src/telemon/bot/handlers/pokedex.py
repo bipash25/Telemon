@@ -550,6 +550,90 @@ def format_pokedex_list_text(
     return "\n".join(lines)
 
 
+async def _build_evolution_chain_text(
+    session: AsyncSession, species: PokemonSpecies
+) -> str:
+    """Build a 'Bulbasaur → Ivysaur → Venusaur' style evolution chain line."""
+    import json
+    from pathlib import Path
+
+    chain_id = species.evolution_chain_id
+    if not chain_id:
+        return "<b>Evolution:</b> Does not evolve"
+
+    try:
+        evo_path = Path(__file__).parent.parent.parent.parent / "data" / "evolutions.json"
+        with open(evo_path) as f:
+            all_chains = json.load(f)
+
+        chain_data = all_chains.get(str(chain_id))
+        if not chain_data or not chain_data.get("chain"):
+            return "<b>Evolution:</b> Does not evolve"
+
+        # Collect all species IDs in this chain
+        chain_entries = chain_data["chain"]
+        species_ids: set[int] = set()
+        for entry in chain_entries:
+            species_ids.add(entry["species_id"])
+            species_ids.add(entry["evolves_to"])
+
+        # Fetch names from DB
+        result = await session.execute(
+            select(PokemonSpecies.national_dex, PokemonSpecies.name)
+            .where(PokemonSpecies.national_dex.in_(species_ids))
+        )
+        id_to_name: dict[int, str] = {row[0]: row[1] for row in result.all()}
+
+        # Build ordered chain: find the base (species not in any evolves_to)
+        evolves_to_set = {e["evolves_to"] for e in chain_entries}
+        from_set = {e["species_id"] for e in chain_entries}
+        bases = from_set - evolves_to_set
+
+        if not bases:
+            # Fallback — everything evolves from something, pick lowest dex
+            bases = {min(species_ids)}
+
+        # Walk from each base
+        chains: list[list[str]] = []
+        for base_id in sorted(bases):
+            path = [base_id]
+            current = base_id
+            while True:
+                nexts = [e["evolves_to"] for e in chain_entries if e["species_id"] == current]
+                if not nexts:
+                    break
+                current = nexts[0]
+                path.append(current)
+            chain_names = []
+            for sid in path:
+                name = id_to_name.get(sid, f"#{sid}")
+                if sid == species.national_dex:
+                    chain_names.append(f"<b>{name}</b>")
+                else:
+                    chain_names.append(name)
+            chains.append(chain_names)
+
+        if not chains:
+            return "<b>Evolution:</b> Does not evolve"
+
+        # Usually just one chain, but branching evolutions (e.g. Eevee) produce many
+        if len(chains) == 1:
+            return f"<b>Evolution:</b> {' → '.join(chains[0])}"
+
+        # For branching, show base → branch1 / branch2 ...
+        # Common prefix
+        base_name = chains[0][0]
+        branch_ends = [c[-1] for c in chains if len(c) > 1]
+        if len(branch_ends) <= 5:
+            branches = " / ".join(branch_ends)
+            return f"<b>Evolution:</b> {base_name} → {branches}"
+        else:
+            return f"<b>Evolution:</b> {base_name} → {len(branch_ends)} forms"
+
+    except Exception:
+        return "<b>Evolution:</b> —"
+
+
 async def pokedex_search(
     message: Message, session: AsyncSession, user: User, query: str
 ) -> None:
@@ -637,15 +721,63 @@ async def pokedex_search(
     if first_caught:
         first_caught_text = f"\n<b>First Caught:</b> {first_caught.strftime('%Y-%m-%d')}"
 
+    # Height & Weight (stored as decimeters / hectograms)
+    height_m = species.height / 10
+    weight_kg = species.weight / 10
+    hw_line = f"Height: {height_m:.1f} m | Weight: {weight_kg:.1f} kg"
+
+    # Abilities
+    ability_parts = [a.replace("-", " ").title() for a in (species.abilities or [])]
+    if species.hidden_ability:
+        ability_parts.append(f"{species.hidden_ability.replace('-', ' ').title()} (Hidden)")
+    abilities_line = ", ".join(ability_parts) if ability_parts else "Unknown"
+
+    # Gender ratio
+    if species.gender_ratio is None:
+        gender_line = "Genderless"
+    else:
+        female = species.gender_ratio
+        male = 100 - female
+        gender_line = f"♂ {male:.0f}% / ♀ {female:.0f}%"
+
+    # Egg groups
+    egg_groups = [eg.replace("-", " ").title() for eg in (species.egg_groups or [])]
+    egg_line = " / ".join(egg_groups) if egg_groups else "Undiscovered"
+
+    # Catch rate (rough %)
+    catch_pct = round(species.catch_rate / 255 * 100, 1)
+    catch_line = f"{species.catch_rate} ({catch_pct}%)"
+
+    # Evolution chain
+    evo_line = await _build_evolution_chain_text(session, species)
+
+    # Flavor text
+    flavor = ""
+    if species.flavor_text:
+        flavor = f"\n<i>{species.flavor_text}</i>\n"
+
+    # Inline sprite emoji
+    try:
+        from telemon.core.emoji import poke_emoji
+        sprite = poke_emoji(species.national_dex)
+    except Exception:
+        sprite = ""
+
     caption = (
         f"📕 <b>Pokédex Entry #{species.national_dex:03d}</b>\n\n"
-        f"<b>{species.name}</b>\n"
-        f"Type: {types}\n"
-        f"Generation: {gen_text}\n"
-        f"Rarity: {rarity}\n\n"
+        f"{sprite}<b>{species.name}</b>\n"
+        f"Type: {types}  |  {gen_text}\n"
+        f"Rarity: {rarity}\n"
+        f"{hw_line}\n"
+        f"{flavor}\n"
+        f"<b>Abilities:</b> {abilities_line}\n"
+        f"<b>Gender:</b> {gender_line}\n"
+        f"<b>Egg Groups:</b> {egg_line}\n"
+        f"<b>Catch Rate:</b> {catch_line}\n\n"
+        f"<b>Base Stats</b> (BST: {species.base_stat_total})\n{stats_line}\n\n"
+        f"{evo_line}\n"
         f"<b>Status:</b> {status}\n"
         f"<b>Times Caught:</b> {times_caught}{first_caught_text}\n\n"
-        f"<b>Base Stats:</b> (BST: {species.base_stat_total})\n{stats_line}\n\n"
         f"<b>Your {species.name}:</b>\n{owned_text}"
     )
 

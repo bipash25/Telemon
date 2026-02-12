@@ -320,8 +320,15 @@ async def cmd_info(message: Message, session: AsyncSession, user: User) -> None:
 
     nickname_line = f'\nNickname: "{poke.nickname}"' if poke.nickname else ""
 
+    # Inline sprite emoji
+    try:
+        from telemon.core.emoji import poke_emoji
+        sprite = poke_emoji(poke.species.national_dex)
+    except Exception:
+        sprite = ""
+
     info = f"""\
-<b>{poke.display_name}</b>{shiny}{fav}{gender_text}
+{sprite}<b>{poke.display_name}</b>{shiny}{fav}{gender_text}
 {poke.species.name} #{poke.species.national_dex} | Gen {poke.species.generation}{nickname_line}
 
 <b>Type:</b> {type_text}
