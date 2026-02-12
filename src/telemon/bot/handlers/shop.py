@@ -552,7 +552,7 @@ async def _resolve_use_target(
         poke_result = await session.execute(
             select(Pokemon)
             .where(Pokemon.owner_id == user.telegram_id)
-            .order_by(Pokemon.caught_at.desc())
+            .order_by(Pokemon.caught_at.asc())
         )
         pokemon_list = list(poke_result.scalars().all())
 

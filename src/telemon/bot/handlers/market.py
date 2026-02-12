@@ -259,7 +259,7 @@ async def get_user_pokemon_list(session: AsyncSession, user_id: int) -> list[Pok
     result = await session.execute(
         select(Pokemon)
         .where(Pokemon.owner_id == user_id)
-        .order_by(Pokemon.caught_at.desc())
+        .order_by(Pokemon.caught_at.asc())
     )
     return list(result.scalars().all())
 

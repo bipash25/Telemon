@@ -180,7 +180,7 @@ async def cmd_duel(message: Message, session: AsyncSession, user: User) -> None:
         result = await session.execute(
             select(Pokemon)
             .where(Pokemon.owner_id == user.telegram_id)
-            .order_by(Pokemon.caught_at.desc())
+            .order_by(Pokemon.caught_at.asc())
             .limit(1)
         )
         first_poke = result.scalar_one_or_none()
@@ -315,7 +315,7 @@ async def callback_accept_battle(
         poke_result = await session.execute(
             select(Pokemon)
             .where(Pokemon.owner_id == user.telegram_id)
-            .order_by(Pokemon.caught_at.desc())
+            .order_by(Pokemon.caught_at.asc())
             .limit(1)
         )
         first_poke = poke_result.scalar_one_or_none()

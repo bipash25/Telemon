@@ -95,11 +95,11 @@ def parse_pokemon_args(text: str) -> dict:
 async def get_user_pokemon_by_index(
     session: AsyncSession, user_id: int, index: int
 ) -> Pokemon | None:
-    """Get a user's Pokemon by 1-based index (ordered by catch date desc)."""
+    """Get a user's Pokemon by 1-based index (ordered by catch date asc — first caught = #1)."""
     result = await session.execute(
         select(Pokemon)
         .where(Pokemon.owner_id == user_id)
-        .order_by(Pokemon.caught_at.desc())
+        .order_by(Pokemon.caught_at.asc())
         .offset(index - 1)
         .limit(1)
     )
@@ -114,7 +114,14 @@ async def resolve_pokemon(
         if arg.isdigit():
             return await get_user_pokemon_by_index(session, user.telegram_id, int(arg))
         elif arg == "latest":
-            return await get_user_pokemon_by_index(session, user.telegram_id, 1)
+            # Latest = most recently caught, query desc + limit 1
+            result = await session.execute(
+                select(Pokemon)
+                .where(Pokemon.owner_id == user.telegram_id)
+                .order_by(Pokemon.caught_at.desc())
+                .limit(1)
+            )
+            return result.scalar_one_or_none()
     
     # Fall back to selected Pokemon
     if user.selected_pokemon_id:
@@ -180,7 +187,7 @@ async def cmd_pokemon(message: Message, session: AsyncSession, user: User) -> No
     elif order == "name":
         query = query.order_by(PokemonSpecies.name.asc())
     else:  # recent (default)
-        query = query.order_by(Pokemon.caught_at.desc())
+        query = query.order_by(Pokemon.caught_at.asc())
 
     # Get total count
     count_query = select(func.count()).select_from(query.subquery())
@@ -556,7 +563,7 @@ async def callback_pokemon_page(
         select(Pokemon)
         .where(Pokemon.owner_id == user.telegram_id)
         .join(PokemonSpecies, Pokemon.species_id == PokemonSpecies.national_dex)
-        .order_by(Pokemon.caught_at.desc())
+        .order_by(Pokemon.caught_at.asc())
     )
 
     # Get total count
@@ -618,7 +625,7 @@ async def cmd_evolve(message: Message, session: AsyncSession, user: User) -> Non
     result = await session.execute(
         select(Pokemon)
         .where(Pokemon.owner_id == user.telegram_id)
-        .order_by(Pokemon.caught_at.desc())
+        .order_by(Pokemon.caught_at.asc())
     )
     pokemon_list = result.scalars().all()
 

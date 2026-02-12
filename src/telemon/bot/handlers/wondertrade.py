@@ -22,11 +22,11 @@ _wt_cooldowns: dict[int, datetime] = {}
 async def _get_user_pokemon_by_index(
     session: AsyncSession, user_id: int, index: int
 ) -> Pokemon | None:
-    """Get a user's Pokemon by 1-based index (sorted by caught_at desc)."""
+    """Get a user's Pokemon by 1-based index (sorted by caught_at asc)."""
     result = await session.execute(
         select(Pokemon)
         .where(Pokemon.owner_id == user_id)
-        .order_by(Pokemon.caught_at.desc())
+        .order_by(Pokemon.caught_at.asc())
     )
     pokemon_list = list(result.scalars().all())
     if index < 1 or index > len(pokemon_list):

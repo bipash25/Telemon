@@ -37,7 +37,7 @@ async def _resolve_pokemon(
         result = await session.execute(
             select(Pokemon)
             .where(Pokemon.owner_id == user.telegram_id)
-            .order_by(Pokemon.caught_at.desc())
+            .order_by(Pokemon.caught_at.asc())
             .offset(idx - 1)
             .limit(1)
         )
