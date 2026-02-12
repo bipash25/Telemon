@@ -650,6 +650,9 @@ async def execute_move(
     else:
         battle.battle_state["p1_hp"] = new_defender_hp
     
+    # Force update the battle state to ensure SQLAlchemy detects the change in JSONB
+    battle.battle_state = dict(battle.battle_state)
+    
     # Add to battle log
     log_entry = {
         "turn": battle.current_turn,

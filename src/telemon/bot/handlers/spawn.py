@@ -183,6 +183,31 @@ async def track_group_message(
 
     # Increment message count
     group.message_count += 1
+
+    # Decrement egg steps for this user (best-effort)
+    try:
+        from telemon.core.breeding import add_steps_to_eggs
+
+        ready_eggs = await add_steps_to_eggs(session, user_id, steps=1)
+        if ready_eggs:
+            try:
+                egg_names = []
+                for egg in ready_eggs:
+                    name = egg.species.name if egg.species else "an egg"
+                    egg_names.append(name)
+                names_text = ", ".join(egg_names)
+                await bot.send_message(
+                    chat_id=user_id,
+                    text=(
+                        f"🥚 Your egg{'s' if len(ready_eggs) > 1 else ''} "
+                        f"({names_text}) {'are' if len(ready_eggs) > 1 else 'is'} "
+                        f"ready to hatch!\nUse /hatch to hatch {'them' if len(ready_eggs) > 1 else 'it'}!"
+                    ),
+                )
+            except Exception:
+                pass  # DM notification is best-effort
+    except Exception:
+        pass  # Don't break spawn tracking if breeding fails
     
     # Log every 5 messages for debugging (reduce spam)
     if group.message_count % 5 == 0:

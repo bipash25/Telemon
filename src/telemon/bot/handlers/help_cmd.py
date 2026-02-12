@@ -89,6 +89,14 @@ HELP_MESSAGE = """
 /achievements - View your achievement progress
 /badges - Same as /achievements
 
+<b>Breeding</b>
+/daycare - View daycare status
+/daycare add [#] - Place Pokemon in daycare
+/daycare remove [1/2] - Remove from daycare slot
+/breed - Produce an egg (needs 2 compatible Pokemon)
+/eggs - View your eggs and hatch progress
+/hatch - Hatch ready eggs
+
 <b>Admin</b> (Group admins only)
 /settings - Group settings
 /spawn - Force a spawn
@@ -352,6 +360,61 @@ Moves already known are marked with [Known].
 
 <b>Example:</b> /learnable
 <b>Example:</b> /learnable 5
+""",
+    "daycare": """
+<b>/daycare</b>
+
+Manage your Pokemon daycare for breeding.
+
+<b>Commands:</b>
+/daycare — View daycare status & compatibility
+/daycare add [#] — Place a Pokemon in daycare (by index)
+/daycare add — Place your selected Pokemon
+/daycare remove [1/2] — Remove from slot 1 or 2
+
+You can have up to 2 Pokemon in the daycare at a time.
+""",
+    "breed": """
+<b>/breed</b>
+
+Attempt to breed the two Pokemon in your daycare.
+
+<b>Requirements:</b>
+- 2 Pokemon in daycare
+- Compatible egg groups (or one is Ditto)
+- One male + one female (or Ditto + anything)
+- Not in "Undiscovered" egg group
+
+<b>Egg Details:</b>
+- 3 IVs inherited from parents, rest random
+- Species = base form of mother's line
+- Shiny chance: 1/4096
+- Max 6 eggs at a time
+
+Steps decrease with group messages. Use /hatch when ready!
+""",
+    "eggs": """
+<b>/eggs</b>
+
+View all your Pokemon eggs with hatch progress.
+
+Each egg shows:
+- Species, IV percentage
+- Progress bar & steps remaining
+- Ready status
+
+Steps are added automatically when you chat in groups.
+""",
+    "hatch": """
+<b>/hatch</b>
+
+Hatch all eggs that have reached 0 steps remaining.
+
+Hatched Pokemon:
+- Start at Level 1
+- Have 120 base friendship (higher than caught)
+- Inherit 3 IVs from parents
+- Get starter moves assigned automatically
 """,
 }
 

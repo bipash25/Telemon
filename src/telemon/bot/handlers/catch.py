@@ -261,31 +261,114 @@ async def cmd_catch(message: Message, session: AsyncSession, user: User) -> None
     session.add(new_pokemon)
 
     # Assign initial moves based on species learnset
+    # Explicitly set species relationship since it might not be loaded on the new object yet
+    new_pokemon.species = spawn.species
+    
     from telemon.core.moves import assign_starter_moves
 
     await assign_starter_moves(session, new_pokemon)
 
     await session.commit()
 
-    # Update quest progress
-    from telemon.core.quests import update_quest_progress
-
     quest_msg = ""
-    # Generic catch quest
-    completed = await update_quest_progress(session, user.telegram_id, "catch")
-    # Type-specific catch quest
-    for ptype in spawn.species.types:
-        completed += await update_quest_progress(
-            session, user.telegram_id, "catch_type", params={"type": ptype.lower()}
+    chain_msg = ""
+    xp_msg = ""
+    ach_notifications = ""
+
+    try:
+        # Update quest progress
+        from telemon.core.quests import update_quest_progress
+
+        # Generic catch quest
+        completed = await update_quest_progress(session, user.telegram_id, "catch")
+        # Type-specific catch quest
+        for ptype in spawn.species.types:
+            completed += await update_quest_progress(
+                session, user.telegram_id, "catch_type", params={"type": ptype.lower()}
+            )
+        # Shiny catch quest
+        if spawn.is_shiny:
+            completed += await update_quest_progress(session, user.telegram_id, "catch_shiny")
+        if completed:
+            await session.commit()
+            quest_msg = "\n📋 Quest progress updated!"
+            for q in completed:
+                quest_msg += f"\n  🎉 Quest complete: {q.description} (+{q.reward_coins:,} TC)"
+
+        # Update group stats
+        group_result = await session.execute(
+            select(Group).where(Group.chat_id == chat_id)
         )
-    # Shiny catch quest
-    if spawn.is_shiny:
-        completed += await update_quest_progress(session, user.telegram_id, "catch_shiny")
-    if completed:
-        await session.commit()
-        quest_msg = "\n📋 Quest progress updated!"
-        for q in completed:
-            quest_msg += f"\n  🎉 Quest complete: {q.description} (+{q.reward_coins:,} TC)"
+        group = group_result.scalar_one_or_none()
+        if group:
+            group.total_catches += 1
+
+        # Update shiny hunt chain
+        if user.shiny_hunt_species_id:
+            if user.shiny_hunt_species_id == spawn.species_id:
+                # Correct species - increment chain
+                user.shiny_hunt_chain += 1
+                chain_msg = f"\n🔗 Chain: {user.shiny_hunt_chain}"
+                if spawn.is_shiny:
+                    chain_msg += " ✨ SHINY FOUND!"
+            else:
+                # Wrong species - break chain
+                old_chain = user.shiny_hunt_chain
+                if old_chain > 0:
+                    user.shiny_hunt_chain = 0
+                    chain_msg = f"\n⛓️‍💥 Chain broken! (was {old_chain})"
+
+        # Friendship gain: selected Pokemon gets +1 per catch (Soothe Bell: +2)
+        # Also award XP from catching
+        if user.selected_pokemon_id:
+            sel_result = await session.execute(
+                select(Pokemon)
+                .where(Pokemon.id == user.selected_pokemon_id)
+                .where(Pokemon.owner_id == user.telegram_id)
+            )
+            sel_poke = sel_result.scalar_one_or_none()
+            if sel_poke and sel_poke.friendship < 255:
+                gain = 1
+                if sel_poke.held_item and sel_poke.held_item.lower() == "soothe bell":
+                    gain = 2
+                sel_poke.friendship = min(255, sel_poke.friendship + gain)
+
+            # XP from catching
+            if sel_poke and sel_poke.level < 100:
+                from telemon.core.leveling import calculate_catch_xp, add_xp_to_pokemon, format_xp_message
+
+                catch_xp = calculate_catch_xp(new_pokemon.level, spawn.species.catch_rate)
+                xp_added, levels_gained, learned_moves = await add_xp_to_pokemon(
+                    session, str(sel_poke.id), catch_xp
+                )
+                if xp_added > 0:
+                    xp_msg = "\n" + format_xp_message(sel_poke.display_name, xp_added, levels_gained, learned_moves)
+
+        # Achievement checks
+        from telemon.core.achievements import check_achievements, format_achievement_notification
+
+        ach_events = ["catch"]
+        if spawn.is_shiny:
+            ach_events.append("catch_shiny")
+        if iv_percent >= 100.0:
+            ach_events.append("catch_perfect")
+        if spawn.species.is_legendary:
+            ach_events.append("catch_legendary")
+        if spawn.species.is_mythical:
+            ach_events.append("catch_mythical")
+        if is_new_pokedex_entry:
+            ach_events.append("pokedex_update")
+
+        all_new_achievements = []
+        for ev in ach_events:
+            all_new_achievements.extend(await check_achievements(session, user.telegram_id, ev))
+        if all_new_achievements:
+            await session.commit()
+            ach_notifications = format_achievement_notification(all_new_achievements)
+
+    except Exception as e:
+        logger.error("Error in post-catch processing", error=str(e), exc_info=True)
+        # We continue to send the success message even if secondary updates failed
 
     # Build response message
     shiny_text = " ✨ SHINY" if spawn.is_shiny else ""
@@ -336,27 +419,9 @@ async def cmd_catch(message: Message, session: AsyncSession, user: User) -> None
     if quest_msg:
         msg_lines.append(quest_msg)
 
-    # Achievement checks
-    from telemon.core.achievements import check_achievements, format_achievement_notification
-
-    ach_events = ["catch"]
-    if spawn.is_shiny:
-        ach_events.append("catch_shiny")
-    if iv_percent >= 100.0:
-        ach_events.append("catch_perfect")
-    if spawn.species.is_legendary:
-        ach_events.append("catch_legendary")
-    if spawn.species.is_mythical:
-        ach_events.append("catch_mythical")
-    if is_new_pokedex_entry:
-        ach_events.append("pokedex_update")
-
-    all_new_achievements = []
-    for ev in ach_events:
-        all_new_achievements.extend(await check_achievements(session, user.telegram_id, ev))
-    if all_new_achievements:
-        await session.commit()
-        msg_lines.append(format_achievement_notification(all_new_achievements))
+    # Achievements
+    if ach_notifications:
+        msg_lines.append(ach_notifications)
 
     await message.answer("\n".join(msg_lines))
 

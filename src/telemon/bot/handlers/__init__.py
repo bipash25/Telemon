@@ -6,6 +6,7 @@ from telemon.bot.handlers import (
     achievements,
     admin,
     battle,
+    breeding,
     catch,
     help_cmd,
     leaderboard,
@@ -55,6 +56,9 @@ def register_all_handlers(dp: Dispatcher) -> None:
 
     # Achievements
     dp.include_router(achievements.router)
+
+    # Breeding
+    dp.include_router(breeding.router)
 
     # Admin handlers
     dp.include_router(admin.router)

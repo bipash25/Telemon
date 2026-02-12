@@ -32,6 +32,7 @@ from telemon.database.models.spawn_admin import SpawnAdmin
 from telemon.database.models.quest import UserQuest
 from telemon.database.models.wondertrade import WonderTrade
 from telemon.database.models.achievement import UserAchievement
+from telemon.database.models.breeding import DaycareSlot, PokemonEgg
 
 # Alembic Config object
 config = context.config

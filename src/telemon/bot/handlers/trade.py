@@ -38,7 +38,7 @@ async def get_user_pokemon_list(session: AsyncSession, user_id: int) -> list[Pok
         .where(Pokemon.owner_id == user_id)
         .order_by(Pokemon.caught_at.desc())
     )
-    return result.scalars().all()
+    return list(result.scalars().all())
 
 
 async def format_trade_status(session: AsyncSession, trade: Trade) -> str:
@@ -604,86 +604,106 @@ async def execute_trade(message: Message, session: AsyncSession, trade: Trade) -
         user2_pokemon_count=len(trade.user2_pokemon_ids or []),
     )
 
-    # Check for trade evolutions
-    evolution_messages = []
-    for poke, new_owner_id in traded_pokemon:
-        evo_result = await check_evolution(
-            session, poke, new_owner_id, trigger="trade"
-        )
-        if evo_result.can_evolve:
-            success, evo_msg = await evolve_pokemon(
-                session, poke, new_owner_id, trigger="trade"
+    try:
+        # Check for trade evolutions
+        evolution_messages = []
+        for poke, new_owner_id in traded_pokemon:
+            # Refresh to ensure species data is available for evolution checks
+            await session.refresh(poke, attribute_names=['species'])
+            
+            from telemon.core.evolution import check_evolution, evolve_pokemon
+            evo_result = await check_evolution(
+                session, poke, new_owner_id, is_trade=True
             )
-            if success:
-                await session.refresh(poke)
-                evolution_messages.append(
-                    f" {evo_msg}"
+            if evo_result.can_evolve:
+                success, evo_msg = await evolve_pokemon(
+                    session, poke, new_owner_id, is_trade=True
                 )
-                logger.info(
-                    "Trade evolution occurred",
-                    pokemon_id=str(poke.id),
-                    new_species=poke.species.name,
-                    new_owner_id=new_owner_id,
-                )
+                if success:
+                    await session.refresh(poke)
+                    evolution_messages.append(
+                        f" {evo_msg}"
+                    )
+                    logger.info(
+                        "Trade evolution occurred",
+                        pokemon_id=str(poke.id),
+                        new_species=poke.species.name,
+                        new_owner_id=new_owner_id,
+                    )
 
-    await session.commit()
-
-    # Build completion message
-    user1_name = user1.username or f"User {trade.user1_id}"
-    user2_name = user2.username or f"User {trade.user2_id}"
-
-    response = (
-        f" <b>Trade Complete!</b>\n\n"
-        f"@{user1_name}  @{user2_name}\n\n"
-    )
-
-    if trade.user1_pokemon_ids:
-        response += f"@{user1_name} sent {len(trade.user1_pokemon_ids)} Pokemon\n"
-    if trade.user2_pokemon_ids:
-        response += f"@{user2_name} sent {len(trade.user2_pokemon_ids)} Pokemon\n"
-    if trade.user1_coins:
-        response += f"@{user1_name} sent {trade.user1_coins:,} TC\n"
-    if trade.user2_coins:
-        response += f"@{user2_name} sent {trade.user2_coins:,} TC\n"
-
-    if evolution_messages:
-        response += "\n" + "\n".join(evolution_messages)
-
-    # Quest progress for trade (was missing for direct trades)
-    from telemon.core.quests import update_quest_progress
-    await update_quest_progress(session, trade.user1_id, "trade")
-    await update_quest_progress(session, trade.user2_id, "trade")
-
-    # XP rewards from trading
-    from telemon.core.leveling import calculate_trade_xp, add_xp_to_pokemon, format_xp_message
-    trade_xp = calculate_trade_xp()
-
-    for trader_id in [trade.user1_id, trade.user2_id]:
-        trader_result = await session.execute(
-            select(User).where(User.telegram_id == trader_id)
-        )
-        trader = trader_result.scalar_one_or_none()
-        if trader and trader.selected_pokemon_id:
-            xp_added, levels_gained, learned_moves = await add_xp_to_pokemon(
-                session, trader.selected_pokemon_id, trade_xp
-            )
-            if xp_added > 0 and levels_gained:
-                poke_r = await session.execute(
-                    select(Pokemon).where(Pokemon.id == trader.selected_pokemon_id)
-                )
-                poke = poke_r.scalar_one_or_none()
-                if poke:
-                    response += f"\n{poke.display_name} leveled up to Lv.{poke.level}!"
-    await session.commit()
-
-    # Achievement hooks for trade
-    from telemon.core.achievements import check_achievements, format_achievement_notification
-    trade_achs_1 = await check_achievements(session, trade.user1_id, "trade")
-    trade_achs_2 = await check_achievements(session, trade.user2_id, "trade")
-    all_trade_achs = trade_achs_1 + trade_achs_2
-    if all_trade_achs:
         await session.commit()
-        response += format_achievement_notification(all_trade_achs)
+
+        # Build completion message
+        user1_name = user1.username or f"User {trade.user1_id}"
+        user2_name = user2.username or f"User {trade.user2_id}"
+
+        response = (
+            f" <b>Trade Complete!</b>\n\n"
+            f"@{user1_name}  @{user2_name}\n\n"
+        )
+
+        if trade.user1_pokemon_ids:
+            response += f"@{user1_name} sent {len(trade.user1_pokemon_ids)} Pokemon\n"
+        if trade.user2_pokemon_ids:
+            response += f"@{user2_name} sent {len(trade.user2_pokemon_ids)} Pokemon\n"
+        if trade.user1_coins:
+            response += f"@{user1_name} sent {trade.user1_coins:,} TC\n"
+        if trade.user2_coins:
+            response += f"@{user2_name} sent {trade.user2_coins:,} TC\n"
+
+        if evolution_messages:
+            response += "\n" + "\n".join(evolution_messages)
+
+        # Quest progress for trade (was missing for direct trades)
+        from telemon.core.quests import update_quest_progress
+        await update_quest_progress(session, trade.user1_id, "trade")
+        await update_quest_progress(session, trade.user2_id, "trade")
+
+        # XP rewards from trading
+        from telemon.core.leveling import calculate_trade_xp, add_xp_to_pokemon, format_xp_message
+        trade_xp = calculate_trade_xp()
+
+        for trader_id in [trade.user1_id, trade.user2_id]:
+            trader_result = await session.execute(
+                select(User).where(User.telegram_id == trader_id)
+            )
+            trader = trader_result.scalar_one_or_none()
+            if trader and trader.selected_pokemon_id:
+                xp_added, levels_gained, learned_moves = await add_xp_to_pokemon(
+                    session, trader.selected_pokemon_id, trade_xp
+                )
+                if xp_added > 0 and levels_gained:
+                    poke_r = await session.execute(
+                        select(Pokemon).where(Pokemon.id == trader.selected_pokemon_id)
+                    )
+                    poke = poke_r.scalar_one_or_none()
+                    if poke:
+                        response += f"\n{poke.display_name} leveled up to Lv.{poke.level}!"
+        await session.commit()
+
+        # Achievement hooks for trade
+        from telemon.core.achievements import check_achievements, format_achievement_notification
+        trade_achs_1 = await check_achievements(session, trade.user1_id, "trade")
+        trade_achs_2 = await check_achievements(session, trade.user2_id, "trade")
+        all_trade_achs = trade_achs_1 + trade_achs_2
+        if all_trade_achs:
+            await session.commit()
+            response += format_achievement_notification(all_trade_achs)
+
+    except Exception as e:
+        logger.error("Error in post-trade processing", error=str(e), exc_info=True)
+        # Fallback response if not built yet or if error occurred
+        if 'response' not in locals():
+            user1_name = user1.username or f"User {trade.user1_id}"
+            user2_name = user2.username or f"User {trade.user2_id}"
+            response = (
+                f" <b>Trade Complete!</b>\n\n"
+                f"@{user1_name}  @{user2_name}\n\n"
+                "Trade data saved successfully.\n"
+                "⚠️ Some post-trade updates (Evolutions/XP/Quests) may have failed."
+            )
+        else:
+             response += "\n⚠️ Some updates (Evolutions/XP/Quests) may have failed."
 
     await message.answer(response)
 

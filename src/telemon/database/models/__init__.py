@@ -16,6 +16,7 @@ from telemon.database.models.trade import Trade, TradeHistory, TradeStatus
 from telemon.database.models.user import User
 from telemon.database.models.wondertrade import WonderTrade
 from telemon.database.models.achievement import UserAchievement
+from telemon.database.models.breeding import DaycareSlot, PokemonEgg
 
 __all__ = [
     # Base
@@ -45,4 +46,7 @@ __all__ = [
     "UserQuest",
     "WonderTrade",
     "UserAchievement",
+    # Breeding
+    "DaycareSlot",
+    "PokemonEgg",
 ]
