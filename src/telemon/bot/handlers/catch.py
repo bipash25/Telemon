@@ -9,6 +9,8 @@ from rapidfuzz import fuzz
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from telemon.config import CURRENCY_NAME, CURRENCY_SHORT
+from telemon.core.constants import NATURES, MAX_IV, MAX_IV_TOTAL, MAX_LEVEL, MAX_FRIENDSHIP, CATCH_LEVEL_MIN, CATCH_LEVEL_MAX, determine_gender, iv_percentage, random_nature
 from telemon.database.models import ActiveSpawn, Group, Pokemon, PokedexEntry, User
 from telemon.logging import get_logger
 
@@ -90,44 +92,30 @@ async def cmd_catch(message: Message, session: AsyncSession, user: User) -> None
 
     # Generate random IVs (0-31)
     ivs = {
-        "hp": random.randint(0, 31),
-        "attack": random.randint(0, 31),
-        "defense": random.randint(0, 31),
-        "sp_attack": random.randint(0, 31),
-        "sp_defense": random.randint(0, 31),
-        "speed": random.randint(0, 31),
+        "hp": random.randint(0, MAX_IV),
+        "attack": random.randint(0, MAX_IV),
+        "defense": random.randint(0, MAX_IV),
+        "sp_attack": random.randint(0, MAX_IV),
+        "sp_defense": random.randint(0, MAX_IV),
+        "speed": random.randint(0, MAX_IV),
     }
 
     # Determine nature
-    natures = [
-        "hardy", "lonely", "brave", "adamant", "naughty",
-        "bold", "docile", "relaxed", "impish", "lax",
-        "timid", "hasty", "serious", "jolly", "naive",
-        "modest", "mild", "quiet", "bashful", "rash",
-        "calm", "gentle", "sassy", "careful", "quirky",
-    ]
-    nature = random.choice(natures)
+    nature = random_nature()
 
     # Pick ability
     abilities = spawn.species.abilities or ["unknown"]
     ability = random.choice(abilities)
 
     # Determine gender
-    gender = None
-    if spawn.species.gender_ratio is not None:
-        if spawn.species.gender_ratio == 0:
-            gender = "male"
-        elif spawn.species.gender_ratio == 100:
-            gender = "female"
-        else:
-            gender = "female" if random.random() * 100 < spawn.species.gender_ratio else "male"
+    gender = determine_gender(spawn.species)
 
     # Create the Pokemon
     new_pokemon = Pokemon(
         id=uuid.uuid4(),
         owner_id=user.telegram_id,
         species_id=spawn.species_id,
-        level=random.randint(1, 30),  # Random level 1-30
+        level=random.randint(CATCH_LEVEL_MIN, CATCH_LEVEL_MAX),  # Random level 1-30
         iv_hp=ivs["hp"],
         iv_attack=ivs["attack"],
         iv_defense=ivs["defense"],
@@ -241,14 +229,14 @@ async def cmd_catch(message: Message, session: AsyncSession, user: User) -> None
             .where(Pokemon.owner_id == user.telegram_id)
         )
         sel_poke = sel_result.scalar_one_or_none()
-        if sel_poke and sel_poke.friendship < 255:
+        if sel_poke and sel_poke.friendship < MAX_FRIENDSHIP:
             gain = 1
             if sel_poke.held_item and sel_poke.held_item.lower() == "soothe bell":
                 gain = 2
-            sel_poke.friendship = min(255, sel_poke.friendship + gain)
+            sel_poke.friendship = min(MAX_FRIENDSHIP, sel_poke.friendship + gain)
 
         # XP from catching
-        if sel_poke and sel_poke.level < 100:
+        if sel_poke and sel_poke.level < MAX_LEVEL:
             from telemon.core.leveling import calculate_catch_xp, add_xp_to_pokemon, format_xp_message
 
             catch_xp = calculate_catch_xp(new_pokemon.level, spawn.species.catch_rate)
@@ -275,6 +263,9 @@ async def cmd_catch(message: Message, session: AsyncSession, user: User) -> None
     xp_msg = ""
     ach_notifications = ""
 
+    iv_total = sum(ivs.values())
+    iv_percent = iv_percentage(iv_total)
+
     try:
         # Update quest progress
         from telemon.core.quests import update_quest_progress
@@ -293,7 +284,7 @@ async def cmd_catch(message: Message, session: AsyncSession, user: User) -> None
             await session.commit()
             quest_msg = "\n📋 Quest progress updated!"
             for q in completed:
-                quest_msg += f"\n  🎉 Quest complete: {q.description} (+{q.reward_coins:,} TC)"
+                quest_msg += f"\n  🎉 Quest complete: {q.description} (+{q.reward_coins:,} {CURRENCY_SHORT})"
 
         # Update group stats
         group_result = await session.execute(
@@ -327,14 +318,14 @@ async def cmd_catch(message: Message, session: AsyncSession, user: User) -> None
                 .where(Pokemon.owner_id == user.telegram_id)
             )
             sel_poke = sel_result.scalar_one_or_none()
-            if sel_poke and sel_poke.friendship < 255:
+            if sel_poke and sel_poke.friendship < MAX_FRIENDSHIP:
                 gain = 1
                 if sel_poke.held_item and sel_poke.held_item.lower() == "soothe bell":
                     gain = 2
-                sel_poke.friendship = min(255, sel_poke.friendship + gain)
+                sel_poke.friendship = min(MAX_FRIENDSHIP, sel_poke.friendship + gain)
 
             # XP from catching
-            if sel_poke and sel_poke.level < 100:
+            if sel_poke and sel_poke.level < MAX_LEVEL:
                 from telemon.core.leveling import calculate_catch_xp, add_xp_to_pokemon, format_xp_message
 
                 catch_xp = calculate_catch_xp(new_pokemon.level, spawn.species.catch_rate)
@@ -377,8 +368,6 @@ async def cmd_catch(message: Message, session: AsyncSession, user: User) -> None
 
     # Build response message
     shiny_text = " ✨ SHINY" if spawn.is_shiny else ""
-    iv_total = sum(ivs.values())
-    iv_percent = round((iv_total / 186) * 100, 1)
 
     # IV quality rating
     if iv_percent >= 90:
@@ -403,7 +392,7 @@ async def cmd_catch(message: Message, session: AsyncSession, user: User) -> None
     if gender:
         msg_lines.append(f"Gender: {'♀' if gender == 'female' else '♂'}")
 
-    msg_lines.append(f"\n+{reward} Telecoins")
+    msg_lines.append(f"\n+{reward} {CURRENCY_NAME}")
 
     # Pokedex bonus message
     if is_new_pokedex_entry:

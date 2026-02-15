@@ -11,6 +11,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from telemon.database.models import Pokemon, PokemonSpecies, User
+from telemon.config import BOT_NAME, CURRENCY_NAME
+from telemon.core.constants import NATURES, STARTER_LEVEL, STARTER_IV_FLOOR, MAX_IV, MAX_IV_TOTAL, determine_gender, iv_percentage, random_nature
 from telemon.logging import get_logger
 
 router = Router(name="start")
@@ -24,16 +26,16 @@ STARTER_POKEMON = {
     "pikachu": 25,
 }
 
-WELCOME_NEW_USER = """
-<b>Welcome to Telemon!</b>
+WELCOME_NEW_USER = f"""
+<b>Welcome to {BOT_NAME}!</b>
 
 A Pokemon-style game right here on Telegram!
 
 <b>Choose your starter Pokemon to begin your journey!</b>
 """
 
-WELCOME_MESSAGE = """
-<b>Welcome to Telemon!</b>
+WELCOME_MESSAGE = f"""
+<b>Welcome to {BOT_NAME}!</b>
 
 A Pokemon-style game right here on Telegram!
 
@@ -55,11 +57,11 @@ A Pokemon-style game right here on Telegram!
 <i>Good luck, Trainer!</i>
 """
 
-RETURNING_MESSAGE = """
-<b>Welcome back, {name}!</b>
+RETURNING_MESSAGE = f"""
+<b>Welcome back, {{name}}!</b>
 
-Pokemon caught: <b>{pokemon_count}</b>
-Balance: <b>{balance}</b> Telecoins
+Pokemon caught: <b>{{pokemon_count}}</b>
+Balance: <b>{{balance}}</b> {CURRENCY_NAME}
 
 Use /pokemon to manage your collection or /help for commands.
 """
@@ -115,119 +117,123 @@ async def callback_starter_selection(
     bot: Bot,
 ) -> None:
     """Handle starter Pokemon selection."""
-    if not callback.data:
-        return
+    try:
+        if not callback.data:
+            return
 
-    starter_name = callback.data.split(":")[1]
-    if starter_name not in STARTER_POKEMON:
-        await callback.answer("Invalid starter!", show_alert=True)
-        return
+        starter_name = callback.data.split(":")[1]
+        if starter_name not in STARTER_POKEMON:
+            await callback.answer("Invalid starter!", show_alert=True)
+            return
 
-    # Check if user already has Pokemon
-    result = await session.execute(
-        select(func.count(Pokemon.id)).where(Pokemon.owner_id == user.telegram_id)
-    )
-    pokemon_count = result.scalar() or 0
+        # Check if user already has Pokemon
+        result = await session.execute(
+            select(func.count(Pokemon.id)).where(Pokemon.owner_id == user.telegram_id)
+        )
+        pokemon_count = result.scalar() or 0
 
-    if pokemon_count > 0:
-        await callback.answer("You already have Pokemon!", show_alert=True)
-        return
+        if pokemon_count > 0:
+            await callback.answer("You already have Pokemon!", show_alert=True)
+            return
 
-    # Get the species
-    species_id = STARTER_POKEMON[starter_name]
-    result = await session.execute(
-        select(PokemonSpecies).where(PokemonSpecies.national_dex == species_id)
-    )
-    species = result.scalar_one_or_none()
+        # Get the species
+        species_id = STARTER_POKEMON[starter_name]
+        result = await session.execute(
+            select(PokemonSpecies).where(PokemonSpecies.national_dex == species_id)
+        )
+        species = result.scalar_one_or_none()
 
-    if not species:
-        await callback.answer("Species not found!", show_alert=True)
-        return
+        if not species:
+            await callback.answer("Species not found!", show_alert=True)
+            return
 
-    # Generate starter stats (slightly better IVs for starters)
-    ivs = {
-        "hp": random.randint(10, 31),
-        "attack": random.randint(10, 31),
-        "defense": random.randint(10, 31),
-        "sp_attack": random.randint(10, 31),
-        "sp_defense": random.randint(10, 31),
-        "speed": random.randint(10, 31),
-    }
+        # Generate starter stats (slightly better IVs for starters)
+        ivs = {
+            "hp": random.randint(STARTER_IV_FLOOR, MAX_IV),
+            "attack": random.randint(STARTER_IV_FLOOR, MAX_IV),
+            "defense": random.randint(STARTER_IV_FLOOR, MAX_IV),
+            "sp_attack": random.randint(STARTER_IV_FLOOR, MAX_IV),
+            "sp_defense": random.randint(STARTER_IV_FLOOR, MAX_IV),
+            "speed": random.randint(STARTER_IV_FLOOR, MAX_IV),
+        }
 
-    natures = [
-        "hardy", "lonely", "brave", "adamant", "naughty",
-        "bold", "docile", "relaxed", "impish", "lax",
-        "timid", "hasty", "serious", "jolly", "naive",
-        "modest", "mild", "quiet", "bashful", "rash",
-        "calm", "gentle", "sassy", "careful", "quirky",
-    ]
-    nature = random.choice(natures)
+        nature = random_nature()
 
-    abilities = species.abilities or ["unknown"]
-    ability = random.choice(abilities)
+        abilities = species.abilities or ["unknown"]
+        ability = random.choice(abilities)
 
-    gender = None
-    if species.gender_ratio is not None:
-        if species.gender_ratio == 0:
-            gender = "male"
-        elif species.gender_ratio == 100:
-            gender = "female"
-        else:
-            gender = "female" if random.random() * 100 < species.gender_ratio else "male"
+        gender = determine_gender(species)
 
-    # Create the starter Pokemon at level 5
-    starter = Pokemon(
-        id=uuid.uuid4(),
-        owner_id=user.telegram_id,
-        species_id=species_id,
-        level=5,
-        iv_hp=ivs["hp"],
-        iv_attack=ivs["attack"],
-        iv_defense=ivs["defense"],
-        iv_sp_attack=ivs["sp_attack"],
-        iv_sp_defense=ivs["sp_defense"],
-        iv_speed=ivs["speed"],
-        nature=nature,
-        ability=ability,
-        is_shiny=False,
-        gender=gender,
-        original_trainer_id=user.telegram_id,
-        is_favorite=True,  # Starter is automatically favorited
-    )
+        # Create the starter Pokemon at level 5
+        starter = Pokemon(
+            id=uuid.uuid4(),
+            owner_id=user.telegram_id,
+            species_id=species_id,
+            level=STARTER_LEVEL,
+            iv_hp=ivs["hp"],
+            iv_attack=ivs["attack"],
+            iv_defense=ivs["defense"],
+            iv_sp_attack=ivs["sp_attack"],
+            iv_sp_defense=ivs["sp_defense"],
+            iv_speed=ivs["speed"],
+            nature=nature,
+            ability=ability,
+            is_shiny=False,
+            gender=gender,
+            original_trainer_id=user.telegram_id,
+            is_favorite=True,  # Starter is automatically favorited
+        )
 
-    session.add(starter)
-    user.selected_pokemon_id = str(starter.id)  # Convert UUID to string
+        session.add(starter)
+        user.selected_pokemon_id = str(starter.id)  # Convert UUID to string
 
-    # Assign initial moves based on species learnset
-    from telemon.core.moves import assign_starter_moves
+        # Explicitly set species relationship since it's not loaded on a new object
+        starter.species = species
 
-    await assign_starter_moves(session, starter)
+        # Assign initial moves based on species learnset
+        from telemon.core.moves import assign_starter_moves
 
-    await session.commit()
+        await assign_starter_moves(session, starter)
 
-    iv_total = sum(ivs.values())
-    iv_percent = round((iv_total / 186) * 100, 1)
+        await session.commit()
 
-    # Edit the original message
-    await callback.message.edit_text(
-        f"<b>Congratulations, {user.display_name}!</b>\n\n"
-        f"You chose <b>{species.name}</b> as your starter Pokemon!\n\n"
-        f"Level: 5\n"
-        f"IVs: {iv_percent}%\n"
-        f"Nature: {nature.capitalize()}\n"
-        f"Ability: {ability}\n"
-        f"Gender: {gender or 'Unknown'}\n\n"
-        f"<i>Your journey begins now! Add me to a group chat to start catching more Pokemon!</i>\n\n"
-        f"Use /help to see all available commands."
-    )
+        iv_total = sum(ivs.values())
+        iv_percent = iv_percentage(iv_total)
 
-    await callback.answer(f"You chose {species.name}!")
+        # Edit the original message
+        await callback.message.edit_text(
+            f"<b>Congratulations, {user.display_name}!</b>\n\n"
+            f"You chose <b>{species.name}</b> as your starter Pokemon!\n\n"
+            f"Level: 5\n"
+            f"IVs: {iv_percent}%\n"
+            f"Nature: {nature.capitalize()}\n"
+            f"Ability: {ability}\n"
+            f"Gender: {gender or 'Unknown'}\n\n"
+            f"<i>Your journey begins now! Add me to a group chat to start catching more Pokemon!</i>\n\n"
+            f"Use /help to see all available commands."
+        )
 
-    logger.info(
-        "User selected starter",
-        user_id=user.telegram_id,
-        starter=species.name,
-    )
+        await callback.answer(f"You chose {species.name}!")
+
+        logger.info(
+            "User selected starter",
+            user_id=user.telegram_id,
+            starter=species.name,
+        )
+
+    except Exception as e:
+        logger.error(
+            "Starter selection failed",
+            error=str(e),
+            error_type=type(e).__name__,
+            user_id=callback.from_user.id if callback.from_user else None,
+            callback_data=callback.data,
+            exc_info=True,
+        )
+        try:
+            await callback.answer("Something went wrong! Please try again.", show_alert=True)
+        except Exception:
+            pass
 
 
 @router.message(Command("ping"))

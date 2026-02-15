@@ -16,6 +16,8 @@ from telemon.core.items import (
     RARE_CANDY_ID,
     SOOTHE_BELL_ID,
 )
+from telemon.config import BOT_NAME, CURRENCY_SHORT
+from telemon.core.constants import MAX_FRIENDSHIP, MAX_LEVEL, MAX_IV_TOTAL
 from telemon.database.models import InventoryItem, Item, Pokemon, User
 from telemon.logging import get_logger
 
@@ -66,7 +68,7 @@ SHOP_CATEGORIES: dict[str, dict] = {
 SHOP_CATEGORY_ORDER = ["evo_stones", "evo_items", "battle", "mega", "utility", "special"]
 
 SHOP_OVERVIEW = (
-    "<b>Telemon Shop</b>\n\n"
+    f"<b>{BOT_NAME} Shop</b>\n\n"
     "Tap a category to browse items.\n\n"
     "<i>Use /buy [id] [qty] to purchase.\n"
     "Use /shopinfo [id] for item details.</i>"
@@ -98,7 +100,7 @@ def _build_category_text(key: str) -> str:
     cat = SHOP_CATEGORIES[key]
     lines = [f"<b>{cat['emoji']} {cat['title']}</b>\n"]
     for item in cat["items"]:
-        lines.append(f"  <code>{item['id']}</code> {item['name']} — {item['cost']:,} TC")
+        lines.append(f"  <code>{item['id']}</code> {item['name']} — {item['cost']:,} {CURRENCY_SHORT}")
     lines.append(f"\n<i>/buy [id] [qty] to purchase.  /shopinfo [id] for details.</i>")
     return "\n".join(lines)
 
@@ -177,8 +179,8 @@ async def cmd_shopinfo(message: Message) -> None:
         f"<b>{item_data['name']}</b> (ID: {item_data['id']})\n\n"
         f"{desc}\n\n"
         f"<b>Category:</b> {item_data['category'].title()}\n"
-        f"<b>Cost:</b> {item_data['cost']:,} TC\n"
-        f"<b>Sell:</b> {item_data['sell_price']:,} TC\n"
+        f"<b>Cost:</b> {item_data['cost']:,} {CURRENCY_SHORT}\n"
+        f"<b>Sell:</b> {item_data['sell_price']:,} {CURRENCY_SHORT}\n"
         f"<b>Properties:</b> {', '.join(props) if props else 'None'}"
     )
 
@@ -243,11 +245,11 @@ async def cmd_buy(message: Message, session: AsyncSession, user: User) -> None:
     # Check if user has enough balance
     if user.balance < total_cost:
         await message.answer(
-            f"Not enough Telecoins!\n\n"
+            f"Not enough {CURRENCY_SHORT}!\n\n"
             f"Item: {item.name} (ID: {item.id})\n"
-            f"Price: {item.cost:,} TC x {quantity} = {total_cost:,} TC\n"
-            f"Your balance: {user.balance:,} TC\n"
-            f"You need: {total_cost - user.balance:,} more TC"
+            f"Price: {item.cost:,} {CURRENCY_SHORT} x {quantity} = {total_cost:,} {CURRENCY_SHORT}\n"
+            f"Your balance: {user.balance:,} {CURRENCY_SHORT}\n"
+            f"You need: {total_cost - user.balance:,} more {CURRENCY_SHORT}"
         )
         return
 
@@ -286,8 +288,8 @@ async def cmd_buy(message: Message, session: AsyncSession, user: User) -> None:
     await message.answer(
         f"<b>Purchase Successful!</b>\n\n"
         f"Bought: {item.name} x{quantity}\n"
-        f"Cost: {total_cost:,} TC\n"
-        f"Remaining balance: {user.balance:,} TC\n\n"
+        f"Cost: {total_cost:,} {CURRENCY_SHORT}\n"
+        f"Remaining balance: {user.balance:,} {CURRENCY_SHORT}\n\n"
         f"<i>Use /inventory to see your items.</i>"
     )
 
@@ -472,13 +474,13 @@ async def cmd_use(message: Message, session: AsyncSession, user: User) -> None:
             )
             return
 
-        if poke.level >= 100:
+        if poke.level >= MAX_LEVEL:
             await message.answer(f"{poke.display_name} is already at max level!")
             return
 
         # Use the rare candy
         poke.level += 1
-        poke.friendship = min(255, poke.friendship + 3)
+        poke.friendship = min(MAX_FRIENDSHIP, poke.friendship + 3)
         inventory_item.quantity -= 1
         await session.commit()
 
@@ -525,7 +527,7 @@ async def cmd_use(message: Message, session: AsyncSession, user: User) -> None:
             f"<b>Soothe Bell</b>\n\n"
             f"{poke.display_name} is now holding a Soothe Bell!\n"
             f"Friendship gains are doubled while holding this item.\n\n"
-            f"Current friendship: {poke.friendship}/255"
+            f"Current friendship: {poke.friendship}/{MAX_FRIENDSHIP}"
         )
         return
 
@@ -617,9 +619,9 @@ async def cmd_pet(message: Message, session: AsyncSession, user: User) -> None:
         )
         return
 
-    if poke.friendship >= 255:
+    if poke.friendship >= MAX_FRIENDSHIP:
         await message.answer(
-            f"{poke.display_name} already has maximum friendship! (255/255)\n"
+            f"{poke.display_name} already has maximum friendship! ({MAX_FRIENDSHIP}/{MAX_FRIENDSHIP})\n"
             f"❤️ Your bond couldn't be stronger!"
         )
         return
@@ -631,7 +633,7 @@ async def cmd_pet(message: Message, session: AsyncSession, user: User) -> None:
         gain *= SOOTHE_BELL_MULTIPLIER
 
     old_friendship = poke.friendship
-    poke.friendship = min(255, poke.friendship + gain)
+    poke.friendship = min(MAX_FRIENDSHIP, poke.friendship + gain)
     actual_gain = poke.friendship - old_friendship
     await session.commit()
 
@@ -640,7 +642,7 @@ async def cmd_pet(message: Message, session: AsyncSession, user: User) -> None:
 
     response = (
         f"You pet <b>{poke.display_name}</b>!\n"
-        f"Friendship: {poke.friendship}/255 (+{actual_gain}{bell_text})\n"
+        f"Friendship: {poke.friendship}/{MAX_FRIENDSHIP} (+{actual_gain}{bell_text})\n"
         f"{hearts}"
     )
 
@@ -651,7 +653,7 @@ async def cmd_pet(message: Message, session: AsyncSession, user: User) -> None:
     if completed:
         await session.commit()
         for q in completed:
-            response += f"\n📋 Quest complete: {q.description} (+{q.reward_coins:,} TC)"
+            response += f"\n📋 Quest complete: {q.description} (+{q.reward_coins:,} {CURRENCY_SHORT})"
 
     # Check if can evolve with friendship now
     evo_result = await check_evolution(session, poke, user.telegram_id)

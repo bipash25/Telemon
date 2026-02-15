@@ -5,6 +5,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from telemon.core.constants import MAX_LEVEL
 from telemon.logging import get_logger
 
 logger = get_logger(__name__)
@@ -45,7 +46,7 @@ async def add_xp_to_pokemon(
     )
     pokemon = result.scalar_one_or_none()
 
-    if not pokemon or pokemon.level >= 100:
+    if not pokemon or pokemon.level >= MAX_LEVEL:
         return 0, [], []
 
     old_level = pokemon.level
@@ -53,7 +54,7 @@ async def add_xp_to_pokemon(
     levels_gained = []
 
     xp_needed = xp_for_next_level(pokemon.level)
-    while pokemon.experience >= xp_needed and pokemon.level < 100:
+    while pokemon.experience >= xp_needed and pokemon.level < MAX_LEVEL:
         pokemon.experience -= xp_needed
         pokemon.level += 1
         levels_gained.append(pokemon.level)

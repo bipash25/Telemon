@@ -7,6 +7,7 @@ from aiogram.filters import Command
 from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from telemon.config import CURRENCY_SHORT
 from telemon.core.quests import claim_quest, get_or_create_quests
 from telemon.database.models import User
 from telemon.logging import get_logger
@@ -86,10 +87,10 @@ async def cmd_quests(message: Message, session: AsyncSession, user: User) -> Non
     claimable = [q for q in daily_quests + weekly_quests if q.is_completed and not q.is_claimed]
     if claimable:
         total_reward = sum(q.reward_coins for q in claimable)
-        lines.append(f"\n<b>{len(claimable)} quest(s) ready to claim!</b> ({total_reward:,} TC)")
+        lines.append(f"\n<b>{len(claimable)} quest(s) ready to claim!</b> ({total_reward:,} {CURRENCY_SHORT})")
         lines.append("Use /quest claimall to claim all rewards")
 
-    lines.append("\n<i>Quests auto-generate. Complete tasks to earn TC!</i>")
+    lines.append(f"\n<i>Quests auto-generate. Complete tasks to earn {CURRENCY_SHORT}!</i>")
 
     await message.answer("\n".join(lines))
 
@@ -99,12 +100,12 @@ def _format_quest_line(quest, index: int) -> str:
     if quest.is_claimed:
         return f"  {index}. ✅ <s>{quest.description}</s> — <i>Claimed!</i>"
     elif quest.is_completed:
-        return f"  {index}. 🎉 {quest.description} — <b>+{quest.reward_coins:,} TC</b> (ready!)"
+        return f"  {index}. 🎉 {quest.description} — <b>+{quest.reward_coins:,} {CURRENCY_SHORT}</b> (ready!)"
     else:
         bar = _progress_bar(quest.current_count, quest.target_count)
         return (
             f"  {index}. {quest.description}\n"
-            f"       [{bar}] {quest.current_count}/{quest.target_count} — {quest.reward_coins:,} TC"
+            f"       [{bar}] {quest.current_count}/{quest.target_count} — {quest.reward_coins:,} {CURRENCY_SHORT}"
         )
 
 
@@ -139,7 +140,7 @@ async def handle_claim_all(
         success, desc, reward = await claim_quest(session, user.telegram_id, str(quest.id))
         if success:
             total_reward += reward
-            claimed_lines.append(f"  ✅ {desc} — +{reward:,} TC")
+            claimed_lines.append(f"  ✅ {desc} — +{reward:,} {CURRENCY_SHORT}")
 
     user.balance += total_reward
     await session.commit()
@@ -147,8 +148,8 @@ async def handle_claim_all(
     await message.answer(
         f"<b>Quests Claimed!</b>\n\n"
         + "\n".join(claimed_lines)
-        + f"\n\n<b>Total:</b> +{total_reward:,} TC\n"
-        f"<b>Balance:</b> {user.balance:,} TC"
+        + f"\n\n<b>Total:</b> +{total_reward:,} {CURRENCY_SHORT}\n"
+        f"<b>Balance:</b> {user.balance:,} {CURRENCY_SHORT}"
     )
 
     logger.info(

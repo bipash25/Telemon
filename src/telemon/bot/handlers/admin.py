@@ -6,29 +6,18 @@ from datetime import datetime
 from aiogram import Bot, Router
 from aiogram.filters import Command
 from aiogram.types import Message
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from telemon.config import BOT_OWNER_ID
+from telemon.core.constants import VALID_TYPES, RARITY_KEYWORDS, MAX_GENERATION
 from telemon.core.spawning import create_spawn, get_random_species
-from telemon.database.models import ActiveSpawn, Group, PokemonSpecies, SpawnAdmin
+from telemon.database.models import ActiveSpawn, Group, Pokemon, PokemonSpecies, SpawnAdmin, User
 from telemon.database.models.spawn_admin import SPAWN_PERMISSIONS
 from telemon.logging import get_logger
 
 router = Router(name="admin")
 logger = get_logger(__name__)
-
-# Bot owner user ID - can always use spawn commands
-BOT_OWNER_ID = 6894738352
-
-# Valid Pokemon types for type: filter
-VALID_TYPES = {
-    "normal", "fire", "water", "grass", "electric", "ice",
-    "fighting", "poison", "ground", "flying", "psychic", "bug",
-    "rock", "ghost", "dragon", "dark", "steel", "fairy",
-}
-
-# Rarity keywords
-RARITY_KEYWORDS = {"legendary", "mythical", "rare", "ultra_rare", "uncommon", "common"}
 
 
 # ------------------------------------------------------------------ #
@@ -117,7 +106,7 @@ def _parse_spawn_args(text: str) -> dict:
         if lower.startswith("gen:"):
             try:
                 gen = int(lower.split(":", 1)[1])
-                if 1 <= gen <= 9:
+                if 1 <= gen <= MAX_GENERATION:
                     result["gen"] = gen
                     result["perms_needed"].add("gen")
             except ValueError:
@@ -693,6 +682,113 @@ Total Catches: {group.total_catches}
 <i>Use inline buttons below to change settings.</i>
 """
     await message.answer(settings_text)
+
+
+# ------------------------------------------------------------------ #
+# /deregister  — reset a user to pre-starter state
+# ------------------------------------------------------------------ #
+
+@router.message(Command("deregister"))
+async def cmd_deregister(message: Message, session: AsyncSession) -> None:
+    """Delete all Pokemon for a user and reset their registration.
+
+    Usage:
+        /deregister <user_id>
+        /deregister (reply to user's message)
+
+    Bot owner + approved spawn admins can use this.
+    """
+    if not message.from_user:
+        return
+
+    user_id = message.from_user.id
+
+    # Check access: bot owner OR spawn admin
+    has_access = await is_spawn_admin(session, user_id)
+    if not has_access:
+        await message.answer("You don't have permission to use /deregister!")
+        return
+
+    # Determine target user
+    parts = (message.text or "").split()
+    target_user_id: int | None = None
+    target_display = "Unknown"
+
+    if message.reply_to_message and message.reply_to_message.from_user:
+        target_user_id = message.reply_to_message.from_user.id
+        target_display = (
+            message.reply_to_message.from_user.username
+            or message.reply_to_message.from_user.full_name
+            or str(target_user_id)
+        )
+    elif len(parts) >= 2:
+        try:
+            target_user_id = int(parts[1])
+            target_display = str(target_user_id)
+        except ValueError:
+            await message.answer(
+                "<b>Usage:</b>\n"
+                "<code>/deregister [user_id]</code>\n"
+                "Or reply to the user's message."
+            )
+            return
+
+    if not target_user_id:
+        await message.answer(
+            "<b>Usage:</b>\n"
+            "<code>/deregister [user_id]</code>\n"
+            "Or reply to the user's message.\n\n"
+            "This removes all Pokemon and resets the user so they can "
+            "pick a new starter via /start."
+        )
+        return
+
+    # Look up the target user record
+    result = await session.execute(
+        select(User).where(User.telegram_id == target_user_id)
+    )
+    target_user = result.scalar_one_or_none()
+
+    if not target_user:
+        await message.answer(
+            f"User <code>{target_user_id}</code> not found in the database."
+        )
+        return
+
+    # Count their Pokemon
+    result = await session.execute(
+        select(func.count(Pokemon.id)).where(Pokemon.owner_id == target_user_id)
+    )
+    pokemon_count = result.scalar() or 0
+
+    if pokemon_count == 0:
+        await message.answer(
+            f"User <b>{target_display}</b> (<code>{target_user_id}</code>) "
+            "has no Pokemon — already deregistered."
+        )
+        return
+
+    # Delete all their Pokemon
+    await session.execute(
+        delete(Pokemon).where(Pokemon.owner_id == target_user_id)
+    )
+
+    # Reset selected pokemon
+    target_user.selected_pokemon_id = None
+
+    await session.commit()
+
+    await message.answer(
+        f"Deregistered <b>{target_display}</b> (<code>{target_user_id}</code>).\n\n"
+        f"Removed <b>{pokemon_count}</b> Pokemon.\n"
+        "They can now use /start to pick a new starter."
+    )
+    logger.info(
+        "User deregistered",
+        target_user_id=target_user_id,
+        pokemon_removed=pokemon_count,
+        deregistered_by=user_id,
+    )
 
 
 # ------------------------------------------------------------------ #

@@ -10,6 +10,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from telemon.core.constants import MAX_GENERATION
 from telemon.database.models import PokedexEntry, Pokemon, PokemonSpecies, User
 from telemon.logging import get_logger
 
@@ -64,7 +65,7 @@ def parse_pokedex_args(text: str) -> dict:
             key, _, value = part.partition(":")
             if key in ("gen", "g", "generation") and value.isdigit():
                 gen = int(value)
-                if 1 <= gen <= 9:
+                if 1 <= gen <= MAX_GENERATION:
                     args["gen"] = gen
             elif key in ("page", "p") and value.isdigit():
                 args["page"] = max(1, int(value))
@@ -72,7 +73,7 @@ def parse_pokedex_args(text: str) -> dict:
         elif part in ("--gen", "--generation"):
             if i + 1 < len(parts) and parts[i + 1].isdigit():
                 gen = int(parts[i + 1])
-                if 1 <= gen <= 9:
+                if 1 <= gen <= MAX_GENERATION:
                     args["gen"] = gen
                 i += 1
         # Plain page number

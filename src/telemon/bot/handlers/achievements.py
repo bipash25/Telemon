@@ -8,6 +8,7 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from telemon.config import CURRENCY_SHORT
 from telemon.core.achievements import ACHIEVEMENTS
 from telemon.database.models.achievement import UserAchievement
 from telemon.database.models.user import User
@@ -60,7 +61,7 @@ def _build_ach_overview(unlocked: set[str]) -> str:
         cat_earned = sum(1 for aid, _ in cat_achs if aid in unlocked)
         lines.append(f"  {emoji} {cat_name}: {cat_earned}/{len(cat_achs)}")
 
-    lines.append(f"\n<b>Total earned:</b> {total_tc:,} TC")
+    lines.append(f"\n<b>Total earned:</b> {total_tc:,} {CURRENCY_SHORT}")
     lines.append("\n<i>Tap a category below to see details.</i>")
 
     return "\n".join(lines)
@@ -102,7 +103,7 @@ def _build_category_text(cat_id: str, cat_name: str, emoji: str, unlocked: set[s
         mark = "+" if aid in unlocked else "-"
         reward_str = f"{ach['reward']:,}"
         lines.append(
-            f"  [{mark}] {ach['name']} — {ach['desc']} ({reward_str} TC)"
+            f"  [{mark}] {ach['name']} — {ach['desc']} ({reward_str} {CURRENCY_SHORT})"
         )
 
     return "\n".join(lines)

@@ -10,6 +10,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from telemon.config import CURRENCY_NAME, CURRENCY_SHORT
+from telemon.core.constants import MAX_LEVEL
 from telemon.core.battle import (
     get_active_battle,
     create_battle,
@@ -161,7 +163,7 @@ async def cmd_duel(message: Message, session: AsyncSession, user: User) -> None:
             "<b>During Battle:</b>\n"
             "Select moves using inline buttons\n"
             "Type effectiveness and stats matter!\n\n"
-            "<i>Rewards: XP and Telecoins for winning</i>"
+            f"<i>Rewards: XP and {CURRENCY_NAME} for winning</i>"
         )
         return
     
@@ -468,7 +470,7 @@ async def callback_execute_move(
         if battle_quest_completed:
             await session.commit()
             for q in battle_quest_completed:
-                lines.append(f"📋 Quest complete: {q.description} (+{q.reward_coins:,} TC)")
+                lines.append(f"📋 Quest complete: {q.description} (+{q.reward_coins:,} {CURRENCY_SHORT})")
 
         # Achievement hooks for battle win
         from telemon.core.achievements import check_achievements, format_achievement_notification
@@ -494,7 +496,7 @@ async def callback_execute_move(
             f"<b>{move_result['defender'].species.name} fainted!</b>",
             "",
             f"<b>@{winner_name} wins!</b>",
-            f"Rewards: {move_result['winner_xp']} XP, {move_result['winner_coins']} TC",
+            f"Rewards: {move_result['winner_xp']} XP, {move_result['winner_coins']} {CURRENCY_SHORT}",
         ])
         
         logger.info(
@@ -690,7 +692,7 @@ async def cmd_battle_wild(message: Message, session: AsyncSession, user: User) -
         return
 
     # Wild Pokemon level is close to player's level (+-5)
-    wild_level = max(1, min(100, player_poke.level + random.randint(-5, 5)))
+    wild_level = max(1, min(MAX_LEVEL, player_poke.level + random.randint(-5, 5)))
 
     # Build participants
     player_part = await build_pve_participant_from_pokemon_db(session, player_poke)
@@ -861,7 +863,7 @@ async def cmd_battle_npc(
         return
 
     # NPC level scales with player + offset
-    npc_level = min(100, player_poke.level + trainer_data["level_offset"])
+    npc_level = min(MAX_LEVEL, player_poke.level + trainer_data["level_offset"])
 
     # Build participants
     player_part = await build_pve_participant_from_pokemon_db(session, player_poke)
@@ -1122,7 +1124,7 @@ async def _handle_pve_win(
         f"<b>{enemy_name} fainted!</b>",
         "",
         f"<b>You win!</b>",
-        f"Rewards: {xp_reward} XP, {coin_reward} TC",
+        f"Rewards: {xp_reward} XP, {coin_reward} {CURRENCY_SHORT}",
     ])
 
     if levels_gained:
@@ -1141,7 +1143,7 @@ async def _handle_pve_win(
     if quest_completed:
         await session.commit()
         for q in quest_completed:
-            lines.append(f"📋 Quest complete: {q.description} (+{q.reward_coins:,} TC)")
+            lines.append(f"📋 Quest complete: {q.description} (+{q.reward_coins:,} {CURRENCY_SHORT})")
 
     # Achievement hooks
     from telemon.core.achievements import check_achievements, format_achievement_notification

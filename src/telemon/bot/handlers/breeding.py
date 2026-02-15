@@ -18,6 +18,7 @@ from telemon.core.breeding import (
     hatch_egg,
     remove_from_daycare,
 )
+from telemon.core.constants import iv_percentage
 from telemon.database.models import Pokemon, User
 from telemon.logging import get_logger
 
@@ -245,7 +246,7 @@ async def cmd_breed(message: Message, session: AsyncSession) -> None:
         egg.iv_hp + egg.iv_attack + egg.iv_defense
         + egg.iv_sp_attack + egg.iv_sp_defense + egg.iv_speed
     )
-    iv_pct = round((iv_total / 186) * 100, 1)
+    iv_pct = iv_percentage(iv_total)
 
     await message.answer(
         f"🥚 <b>An egg appeared!</b>{shiny_text}\n\n"
@@ -287,7 +288,7 @@ async def cmd_eggs(message: Message, session: AsyncSession) -> None:
             egg.iv_hp + egg.iv_attack + egg.iv_defense
             + egg.iv_sp_attack + egg.iv_sp_defense + egg.iv_speed
         )
-        iv_pct = round((iv_total / 186) * 100, 1)
+        iv_pct = iv_percentage(iv_total)
 
         if egg.steps_remaining <= 0:
             lines.append(

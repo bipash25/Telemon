@@ -5,6 +5,9 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from telemon.config import BOT_NAME, CURRENCY_NAME, CURRENCY_SHORT
+from telemon.core.constants import MAX_FRIENDSHIP, MAX_GIFT_AMOUNT, WT_COOLDOWN_SECONDS
+
 router = Router(name="help")
 
 
@@ -29,9 +32,9 @@ HELP_CATEGORIES = {
         "text": (
             "<b>Profile & Economy</b>\n\n"
             "/profile - View your trainer profile\n"
-            "/balance - Check your Telecoins\n"
+            f"/balance - Check your {CURRENCY_NAME}\n"
             "/daily - Claim daily reward (+friendship)\n"
-            "/gift @user [amount] - Send Telecoins"
+            f"/gift @user [amount] - Send {CURRENCY_NAME}"
         ),
     },
     "catch": {
@@ -236,7 +239,7 @@ COMMAND_HELP = {
         "Start a trade with another user.\n\n"
         "<b>Trade Commands:</b>\n"
         "/trade add [#] — Add Pokemon\n"
-        "/trade add coins [amount] — Add Telecoins\n"
+        f"/trade add coins [amount] — Add {CURRENCY_NAME}\n"
         "/trade remove [#] — Remove Pokemon\n"
         "/trade confirm — Confirm your side\n"
         "/trade cancel — Cancel the trade\n\n"
@@ -267,13 +270,13 @@ COMMAND_HELP = {
         "<b>/shop</b>\n\n"
         "Browse the item shop.\n\n"
         "<b>Item Categories:</b>\n"
-        "Evolution Stones (500 TC)\n"
-        "Evolution Items (1000-1500 TC)\n"
-        "Linking Cord (3000 TC)\n"
-        "Soothe Bell (2000 TC)\n"
+        f"Evolution Stones (500 {CURRENCY_SHORT})\n"
+        f"Evolution Items (1000-1500 {CURRENCY_SHORT})\n"
+        f"Linking Cord (3000 {CURRENCY_SHORT})\n"
+        f"Soothe Bell (2000 {CURRENCY_SHORT})\n"
         "Battle Items — Leftovers, Choice Band, etc.\n"
-        "Utility — Rare Candy (200 TC), Incense\n"
-        "Special — Shiny Charm (50,000 TC)\n\n"
+        f"Utility — Rare Candy (200 {CURRENCY_SHORT}), Incense\n"
+        f"Special — Shiny Charm (50,000 {CURRENCY_SHORT})\n\n"
         "/buy [id] [qty] — Purchase items\n"
         "/shopinfo [id] — View item details\n"
         "/use [id] [#] — Use item on Pokemon"
@@ -281,10 +284,10 @@ COMMAND_HELP = {
     "gift": (
         "<b>/gift @user [amount]</b>\n"
         "Also: /give, /send\n\n"
-        "Send Telecoins to another trainer.\n\n"
-        "/gift @friend 500 — Send 500 TC\n"
+        f"Send {CURRENCY_NAME} to another trainer.\n\n"
+        f"/gift @friend 500 — Send 500 {CURRENCY_SHORT}\n"
         "Reply to a message + /gift 500 — Send to that user\n\n"
-        "Maximum: 1,000,000 TC per transfer."
+        f"Maximum: {MAX_GIFT_AMOUNT:,} {CURRENCY_SHORT} per transfer."
     ),
     "pet": (
         "<b>/pet [#]</b>\n\n"
@@ -292,7 +295,7 @@ COMMAND_HELP = {
         "Base gain: +5 friendship per pet\n"
         "With Soothe Bell: +10 per pet\n\n"
         "Friendship is needed for certain evolutions.\n"
-        "Max friendship: 255"
+        f"Max friendship: {MAX_FRIENDSHIP}"
     ),
     "wondertrade": (
         "<b>/wt [pokemon#]</b>\n"
@@ -301,7 +304,7 @@ COMMAND_HELP = {
         "/wt [pokemon#] — Deposit\n"
         "/wt status — Check pool status\n\n"
         "1 Pokemon in the pool at a time.\n"
-        "5 minute cooldown between trades."
+        f"{WT_COOLDOWN_SECONDS // 60} minute cooldown between trades."
     ),
     "achievements": (
         "<b>/achievements</b>\n"
@@ -309,14 +312,14 @@ COMMAND_HELP = {
         "View your achievement progress.\n\n"
         "<b>Categories:</b> Catching, Shiny, Pokedex, Evolution, Battle, "
         "Trading, Daily Streak, Special, Wonder Trade\n\n"
-        "Each achievement grants a TC reward when unlocked."
+        f"Each achievement grants a {CURRENCY_SHORT} reward when unlocked."
     ),
     "battle": (
         "<b>/battle</b>\n"
         "Also: /duel\n\n"
         "<b>PvP:</b> /duel @username\n\n"
         "<b>PvE - Wild:</b> /battle wild\n"
-        "Earn XP and Telecoins.\n\n"
+        f"Earn XP and {CURRENCY_NAME}.\n\n"
         "<b>PvE - NPC:</b> /battle npc [name]\n"
         "Fight gym leaders and champions.\n\n"
         "<b>During Battle:</b>\n"
@@ -421,7 +424,7 @@ def build_help_keyboard() -> InlineKeyboardBuilder:
 
 
 HELP_OVERVIEW = (
-    "<b>Telemon Help</b>\n\n"
+    f"<b>{BOT_NAME} Help</b>\n\n"
     "Tap a category below to see its commands.\n"
     "Use <code>/help [command]</code> for detailed help on any command.\n\n"
     "<i>Most commands work with index numbers (/info 3) or selected Pokemon (/info).</i>"

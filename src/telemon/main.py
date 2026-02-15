@@ -1,4 +1,4 @@
-"""Main entry point for Telemon bot."""
+"""Main entry point for PokeVault bot."""
 
 import asyncio
 import sys
@@ -102,7 +102,7 @@ async def main() -> None:
     """Main function to run the bot."""
     # Set up logging
     setup_logging()
-    logger.info("Starting Telemon bot...")
+    logger.info("Starting PokeVault bot...")
 
     # Initialize database
     try:

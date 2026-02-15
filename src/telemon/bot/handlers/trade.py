@@ -10,6 +10,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from telemon.config import CURRENCY_NAME, CURRENCY_SHORT
 from telemon.core.evolution import check_evolution, evolve_pokemon
 from telemon.database.models import Pokemon, PokemonSpecies, User
 from telemon.database.models.trade import Trade, TradeHistory, TradeStatus
@@ -93,7 +94,7 @@ async def format_trade_status(session: AsyncSession, trade: Trade) -> str:
         lines.append("  <i>No Pokemon</i>")
 
     if trade.user1_coins > 0:
-        lines.append(f"  + {trade.user1_coins:,} TC")
+        lines.append(f"  + {trade.user1_coins:,} {CURRENCY_SHORT}")
 
     lines.append("")
     lines.append(f"<b>{user2_name}</b> {u2_confirm}")
@@ -104,7 +105,7 @@ async def format_trade_status(session: AsyncSession, trade: Trade) -> str:
         lines.append("  <i>No Pokemon</i>")
 
     if trade.user2_coins > 0:
-        lines.append(f"  + {trade.user2_coins:,} TC")
+        lines.append(f"  + {trade.user2_coins:,} {CURRENCY_SHORT}")
 
     lines.append("")
 
@@ -131,7 +132,7 @@ async def cmd_trade(message: Message, session: AsyncSession, user: User) -> None
             "/trade @username - Start trade with user\n"
             "/trade add <id> - Add Pokemon to trade\n"
             "/trade remove <id> - Remove Pokemon from trade\n"
-            "/trade coins [amount] - Add Telecoins\n"
+            f"/trade coins [amount] - Add {CURRENCY_NAME}\n"
             "/trade confirm - Confirm the trade\n"
             "/trade cancel - Cancel the trade\n"
             "/trade status - View current trade\n\n"
@@ -229,7 +230,7 @@ async def start_trade(
         f" <b>Trade Started!</b>\n\n"
         f"@{user.username or 'You'} wants to trade with @{target_username}\n\n"
         "Use /trade add [pokemon_id] to add Pokemon\n"
-        "Use /trade coins [amount] to add Telecoins\n"
+        f"Use /trade coins [amount] to add {CURRENCY_NAME}\n"
         "Use /trade confirm when ready\n"
         "Use /trade cancel to abort"
     )
@@ -297,7 +298,7 @@ async def start_trade_by_id(
         f" <b>Trade Started!</b>\n\n"
         f"You want to trade with @{target_name}\n\n"
         "Use /trade add [pokemon_id] to add Pokemon\n"
-        "Use /trade coins [amount] to add Telecoins\n"
+        f"Use /trade coins [amount] to add {CURRENCY_NAME}\n"
         "Use /trade confirm when ready\n"
         "Use /trade cancel to abort"
     )
@@ -465,8 +466,8 @@ async def trade_add_coins(
 
     if amount > user.balance:
         await message.answer(
-            f" You only have {user.balance:,} TC!\n"
-            f"Requested: {amount:,} TC"
+            f" You only have {user.balance:,} {CURRENCY_SHORT}!\n"
+            f"Requested: {amount:,} {CURRENCY_SHORT}"
         )
         return
 
@@ -483,7 +484,7 @@ async def trade_add_coins(
     await session.commit()
 
     await message.answer(
-        f" Set trade offer to {amount:,} TC!\n\n"
+        f" Set trade offer to {amount:,} {CURRENCY_SHORT}!\n\n"
         + await format_trade_status(session, trade)
     )
 
@@ -532,7 +533,7 @@ async def execute_trade(message: Message, session: AsyncSession, trade: Trade) -
         trade.user1_confirmed = False
         await session.commit()
         await message.answer(
-            f" Trade failed: User 1 doesn't have enough TC!"
+            f" Trade failed: User 1 doesn't have enough {CURRENCY_SHORT}!"
         )
         return
 
@@ -540,7 +541,7 @@ async def execute_trade(message: Message, session: AsyncSession, trade: Trade) -
         trade.user2_confirmed = False
         await session.commit()
         await message.answer(
-            f" Trade failed: User 2 doesn't have enough TC!"
+            f" Trade failed: User 2 doesn't have enough {CURRENCY_SHORT}!"
         )
         return
 
@@ -647,9 +648,9 @@ async def execute_trade(message: Message, session: AsyncSession, trade: Trade) -
         if trade.user2_pokemon_ids:
             response += f"@{user2_name} sent {len(trade.user2_pokemon_ids)} Pokemon\n"
         if trade.user1_coins:
-            response += f"@{user1_name} sent {trade.user1_coins:,} TC\n"
+            response += f"@{user1_name} sent {trade.user1_coins:,} {CURRENCY_SHORT}\n"
         if trade.user2_coins:
-            response += f"@{user2_name} sent {trade.user2_coins:,} TC\n"
+            response += f"@{user2_name} sent {trade.user2_coins:,} {CURRENCY_SHORT}\n"
 
         if evolution_messages:
             response += "\n" + "\n".join(evolution_messages)

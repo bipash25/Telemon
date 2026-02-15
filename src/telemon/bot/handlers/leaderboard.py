@@ -10,6 +10,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from telemon.config import CURRENCY_SHORT
 from telemon.database.models import PokedexEntry, Pokemon, User
 from telemon.logging import get_logger
 
@@ -115,7 +116,7 @@ async def get_wealth_leaderboard(
             "user_id": user.telegram_id,
             "username": user.display_name,
             "value": user.balance,
-            "label": "TC",
+            "label": CURRENCY_SHORT,
         })
     
     return entries, total_users
@@ -667,7 +668,7 @@ async def cmd_rank(message: Message, session: AsyncSession, user: User) -> None:
     
     # Wealth
     wealth_rank = await get_user_rank(session, user.telegram_id, LeaderboardType.WEALTH)
-    lines.append(f"💰 <b>Wealth:</b> {user.balance:,} TC (Rank #{wealth_rank or '?'})")
+    lines.append(f"💰 <b>Wealth:</b> {user.balance:,} {CURRENCY_SHORT} (Rank #{wealth_rank or '?'})")
     
     # Pokedex
     dex_result = await session.execute(

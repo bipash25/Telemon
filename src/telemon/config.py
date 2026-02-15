@@ -1,10 +1,22 @@
-"""Configuration settings for Telemon."""
+"""Configuration settings for PokeVault."""
 
 from functools import lru_cache
 from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# ------------------------------------------------------------------ #
+# Branding — change these three to rename the bot everywhere at once
+# ------------------------------------------------------------------ #
+BOT_NAME: str = "PokeVault"
+CURRENCY_NAME: str = "PokeCoins"
+CURRENCY_SHORT: str = "PC"
+
+# ------------------------------------------------------------------ #
+# Access control
+# ------------------------------------------------------------------ #
+BOT_OWNER_ID: int = 6894738352
 
 
 class Settings(BaseSettings):
@@ -19,7 +31,7 @@ class Settings(BaseSettings):
 
     # Bot Configuration
     bot_token: str = Field(..., description="Telegram Bot API token")
-    bot_username: str = Field(default="telemon_bot", description="Bot username")
+    bot_username: str = Field(default="pokevault_bot", description="Bot username")
 
     # Database Configuration
     database_url: str = Field(

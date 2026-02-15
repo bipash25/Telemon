@@ -9,6 +9,8 @@ from datetime import datetime
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from telemon.config import settings
+from telemon.core.constants import NATURES, MAX_IV, determine_gender
 from telemon.database.models import Pokemon, PokemonSpecies
 from telemon.database.models.breeding import DaycareSlot, PokemonEgg
 from telemon.logging import get_logger
@@ -165,7 +167,7 @@ def calculate_inherited_ivs(
             donor = random.choice([parent1, parent2])
             ivs[stat] = getattr(donor, f"iv_{stat}")
         else:
-            ivs[stat] = random.randint(0, 31)
+            ivs[stat] = random.randint(0, MAX_IV)
 
     return ivs
 
@@ -204,7 +206,7 @@ async def create_egg(
     steps_total = max(egg_species.hatch_counter * 10, 50)
 
     # Shiny chance
-    is_shiny = random.randint(1, 4096) == 1
+    is_shiny = random.randint(1, settings.shiny_base_rate) == 1
 
     egg = PokemonEgg(
         id=uuid.uuid4(),
@@ -427,26 +429,4 @@ async def get_user_eggs(
 # Helpers
 # ---------------------------------------------------------------------------
 
-NATURES = [
-    "adamant", "bashful", "bold", "brave", "calm",
-    "careful", "docile", "gentle", "hardy", "hasty",
-    "impish", "jolly", "lax", "lonely", "mild",
-    "modest", "naive", "naughty", "quiet", "quirky",
-    "rash", "relaxed", "sassy", "serious", "timid",
-]
-
-
-def _determine_gender(species: PokemonSpecies) -> str | None:
-    """Determine gender based on species gender_ratio."""
-    if species.gender_ratio is None:
-        return None  # Genderless
-
-    if species.gender_ratio >= 100:
-        return "female"  # 100% female
-    if species.gender_ratio <= 0:
-        return "male"  # 0% female = 100% male
-
-    # gender_ratio = female percentage
-    if random.random() * 100 < species.gender_ratio:
-        return "female"
-    return "male"
+_determine_gender = determine_gender

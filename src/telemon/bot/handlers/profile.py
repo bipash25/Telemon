@@ -8,7 +8,8 @@ from aiogram.types import Message
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from telemon.config import settings
+from telemon.config import settings, CURRENCY_NAME, CURRENCY_SHORT
+from telemon.core.constants import MAX_FRIENDSHIP, MAX_LEVEL, MAX_GIFT_AMOUNT
 from telemon.database.models import PokedexEntry, Pokemon, User
 from telemon.logging import get_logger
 
@@ -50,12 +51,12 @@ async def cmd_profile(message: Message, session: AsyncSession, user: User) -> No
         sel_poke = sel_result.scalar_one_or_none()
         if sel_poke:
             shiny_mark = " ✨" if sel_poke.is_shiny else ""
-            selected_text = f"{sel_poke.display_name}{shiny_mark} Lv.{sel_poke.level} | Friendship: {sel_poke.friendship}/255"
+            selected_text = f"{sel_poke.display_name}{shiny_mark} Lv.{sel_poke.level} | Friendship: {sel_poke.friendship}/{MAX_FRIENDSHIP}"
 
     profile_text = (
         f"<b>Trainer Profile</b>\n\n"
         f"<b>Name:</b> {user.display_name}\n"
-        f"<b>Balance:</b> {user.balance:,} Telecoins\n\n"
+        f"<b>Balance:</b> {user.balance:,} {CURRENCY_NAME}\n\n"
         f"<b>Pokemon Stats</b>\n"
         f"  Total Caught: {pokemon_count}\n"
         f"  Unique Species: {unique_caught}\n"
@@ -75,7 +76,7 @@ async def cmd_profile(message: Message, session: AsyncSession, user: User) -> No
 @router.message(Command("balance", "bal"))
 async def cmd_balance(message: Message, user: User) -> None:
     """Handle /balance command."""
-    await message.answer(f"<b>Balance:</b> {user.balance:,} Telecoins")
+    await message.answer(f"<b>Balance:</b> {user.balance:,} {CURRENCY_NAME}")
 
 
 @router.message(Command("daily"))
@@ -123,17 +124,17 @@ async def cmd_daily(message: Message, session: AsyncSession, user: User) -> None
             .where(Pokemon.owner_id == user.telegram_id)
         )
         sel_poke = sel_result.scalar_one_or_none()
-        if sel_poke and sel_poke.friendship < 255:
+        if sel_poke and sel_poke.friendship < MAX_FRIENDSHIP:
             gain = 5
             if sel_poke.held_item and sel_poke.held_item.lower() == "soothe bell":
                 gain *= 2
             old = sel_poke.friendship
-            sel_poke.friendship = min(255, sel_poke.friendship + gain)
+            sel_poke.friendship = min(MAX_FRIENDSHIP, sel_poke.friendship + gain)
             actual = sel_poke.friendship - old
-            friendship_text = f"\n{sel_poke.display_name}: +{actual} friendship ({sel_poke.friendship}/255)"
+            friendship_text = f"\n{sel_poke.display_name}: +{actual} friendship ({sel_poke.friendship}/{MAX_FRIENDSHIP})"
 
         # XP from daily claim
-        if sel_poke and sel_poke.level < 100:
+        if sel_poke and sel_poke.level < MAX_LEVEL:
             from telemon.core.leveling import calculate_daily_xp, add_xp_to_pokemon, format_xp_message
 
             daily_xp = calculate_daily_xp(user.daily_streak)
@@ -153,7 +154,7 @@ async def cmd_daily(message: Message, session: AsyncSession, user: User) -> None
     if completed:
         await session.commit()
         for q in completed:
-            daily_quest_msg += f"\n📋 Quest complete: {q.description} (+{q.reward_coins:,} TC)"
+            daily_quest_msg += f"\n\U0001f4cb Quest complete: {q.description} (+{q.reward_coins:,} {CURRENCY_SHORT})"
 
     # Achievement hooks for daily streak
     from telemon.core.achievements import check_achievements, format_achievement_notification
@@ -168,9 +169,9 @@ async def cmd_daily(message: Message, session: AsyncSession, user: User) -> None
 
     await message.answer(
         f"<b>Daily Reward Claimed!</b>\n\n"
-        f"+{base_reward} Telecoins{streak_text}\n"
-        f"Total: <b>+{total_reward}</b> Telecoins\n\n"
-        f"New balance: {user.balance:,} Telecoins\n"
+        f"+{base_reward} {CURRENCY_NAME}{streak_text}\n"
+        f"Total: <b>+{total_reward}</b> {CURRENCY_NAME}\n\n"
+        f"New balance: {user.balance:,} {CURRENCY_NAME}\n"
         f"Current streak: {user.daily_streak} days{friendship_text}{daily_xp_text}{daily_quest_msg}{daily_ach_text}"
     )
 
@@ -185,7 +186,7 @@ async def cmd_gift(message: Message, session: AsyncSession, user: User) -> None:
 
     if len(args) < 3:
         await message.answer(
-            "<b>Gift Telecoins</b>\n\n"
+            f"<b>Gift {CURRENCY_NAME}</b>\n\n"
             "Usage: /gift @username [amount]\n"
             "Example: /gift @friend 500\n\n"
             "You can also reply to a user's message:\n"
@@ -252,11 +253,11 @@ async def cmd_gift(message: Message, session: AsyncSession, user: User) -> None:
 
     # Validate amount
     if amount is None or amount < 1:
-        await message.answer("Amount must be at least 1 TC!")
+        await message.answer(f"Amount must be at least 1 {CURRENCY_SHORT}!")
         return
 
-    if amount > 1_000_000:
-        await message.answer("Maximum gift amount is 1,000,000 TC!")
+    if amount > MAX_GIFT_AMOUNT:
+        await message.answer(f"Maximum gift amount is {MAX_GIFT_AMOUNT:,} {CURRENCY_SHORT}!")
         return
 
     # Can't gift yourself
@@ -277,9 +278,9 @@ async def cmd_gift(message: Message, session: AsyncSession, user: User) -> None:
     # Check balance
     if user.balance < amount:
         await message.answer(
-            f"Not enough Telecoins!\n"
-            f"Your balance: {user.balance:,} TC\n"
-            f"Trying to send: {amount:,} TC"
+            f"Not enough {CURRENCY_NAME}!\n"
+            f"Your balance: {user.balance:,} {CURRENCY_SHORT}\n"
+            f"Trying to send: {amount:,} {CURRENCY_SHORT}"
         )
         return
 
@@ -297,6 +298,6 @@ async def cmd_gift(message: Message, session: AsyncSession, user: User) -> None:
 
     await message.answer(
         f"<b>Gift Sent!</b>\n\n"
-        f"You sent <b>{amount:,} TC</b> to {target_name}!\n\n"
-        f"Your balance: {user.balance:,} TC"
+        f"You sent <b>{amount:,} {CURRENCY_SHORT}</b> to {target_name}!\n\n"
+        f"Your balance: {user.balance:,} {CURRENCY_SHORT}"
     )

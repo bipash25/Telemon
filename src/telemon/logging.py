@@ -1,4 +1,4 @@
-"""Logging configuration for Telemon."""
+"""Logging configuration for PokeVault."""
 
 import logging
 import sys

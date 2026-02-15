@@ -13,6 +13,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from telemon.config import CURRENCY_SHORT
+from telemon.core.constants import VALID_TYPES, MAX_IV_TOTAL, MARKET_MIN_PRICE, MARKET_MAX_PRICE, MARKET_LISTING_DAYS
 from telemon.database.models import (
     ListingStatus,
     MarketListing,
@@ -27,16 +29,6 @@ logger = get_logger(__name__)
 
 # Constants
 LISTINGS_PER_PAGE = 5
-DEFAULT_LISTING_DAYS = 7  # Listings expire after 7 days
-MIN_PRICE = 100
-MAX_PRICE = 1_000_000_000  # 1 billion TC max
-
-# Valid Pokemon types
-VALID_TYPES = {
-    "normal", "fire", "water", "electric", "grass", "ice",
-    "fighting", "poison", "ground", "flying", "psychic", "bug",
-    "rock", "ghost", "dragon", "dark", "steel", "fairy"
-}
 
 
 class SortOrder(str, Enum):
@@ -149,11 +141,11 @@ class MarketFilters:
                 parts.append(f"IV: 0-{self.max_iv:.0f}%")
         if self.min_price or self.max_price:
             if self.min_price and self.max_price:
-                parts.append(f"Price: {self.min_price:,}-{self.max_price:,} TC")
+                parts.append(f"Price: {self.min_price:,}-{self.max_price:,} {CURRENCY_SHORT}")
             elif self.min_price:
-                parts.append(f"Price: {self.min_price:,}+ TC")
+                parts.append(f"Price: {self.min_price:,}+ {CURRENCY_SHORT}")
             else:
-                parts.append(f"Price: 0-{self.max_price:,} TC")
+                parts.append(f"Price: 0-{self.max_price:,} {CURRENCY_SHORT}")
         if self.shiny_only:
             parts.append("Shiny Only")
         if self.sort_by != SortOrder.NEWEST:
@@ -329,7 +321,7 @@ async def get_active_listings(
                 Pokemon.iv_hp + Pokemon.iv_attack + Pokemon.iv_defense +
                 Pokemon.iv_sp_attack + Pokemon.iv_sp_defense + Pokemon.iv_speed
             )
-            iv_percentage = (iv_total * 100.0 / 186.0)
+            iv_percentage = (iv_total * 100.0 / MAX_IV_TOTAL)
 
             if filters.min_iv:
                 query = query.where(iv_percentage >= filters.min_iv)
@@ -350,7 +342,7 @@ async def get_active_listings(
                 Pokemon.iv_hp + Pokemon.iv_attack + Pokemon.iv_defense +
                 Pokemon.iv_sp_attack + Pokemon.iv_sp_defense + Pokemon.iv_speed
             )
-            iv_percentage = (iv_total * 100.0 / 186.0)
+            iv_percentage = (iv_total * 100.0 / MAX_IV_TOTAL)
             if filters.min_iv:
                 count_query = count_query.where(iv_percentage >= filters.min_iv)
             if filters.max_iv:
@@ -467,7 +459,7 @@ async def format_listing(
 
     return (
         f"{prefix}<b>{pokemon.species.name}</b>{shiny} Lv.{pokemon.level} [{types}]\n"
-        f"   IV: {iv_pct:.1f}% | Price: {listing.price:,} TC\n"
+        f"   IV: {iv_pct:.1f}% | Price: {listing.price:,} {CURRENCY_SHORT}\n"
         f"   Seller: {seller_name} | Expires: {time_str}"
     )
 
@@ -630,11 +622,11 @@ async def market_sell(
             "📝 <b>Sell Pokemon</b>\n\n"
             "Usage: /market sell [pokemon_id] [price]\n\n"
             "Example: /market sell 5 10000\n"
-            "(Lists your 5th Pokemon for 10,000 TC)\n\n"
+            f"(Lists your 5th Pokemon for 10,000 {CURRENCY_SHORT})\n\n"
             "Price shortcuts: 10k = 10,000 | 1m = 1,000,000\n\n"
-            f"Min price: {MIN_PRICE:,} TC\n"
-            f"Max price: {MAX_PRICE:,} TC\n"
-            f"Listings expire after {DEFAULT_LISTING_DAYS} days"
+            f"Min price: {MARKET_MIN_PRICE:,} {CURRENCY_SHORT}\n"
+            f"Max price: {MARKET_MAX_PRICE:,} {CURRENCY_SHORT}\n"
+            f"Listings expire after {MARKET_LISTING_DAYS} days"
         )
         return
 
@@ -658,12 +650,12 @@ async def market_sell(
         await message.answer("❌ Invalid price. Use a number (supports k/m suffix).")
         return
 
-    if price < MIN_PRICE:
-        await message.answer(f"❌ Minimum price is {MIN_PRICE:,} TC.")
+    if price < MARKET_MIN_PRICE:
+        await message.answer(f"❌ Minimum price is {MARKET_MIN_PRICE:,} {CURRENCY_SHORT}.")
         return
 
-    if price > MAX_PRICE:
-        await message.answer(f"❌ Maximum price is {MAX_PRICE:,} TC.")
+    if price > MARKET_MAX_PRICE:
+        await message.answer(f"❌ Maximum price is {MARKET_MAX_PRICE:,} {CURRENCY_SHORT}.")
         return
 
     # Get user's Pokemon
@@ -707,7 +699,7 @@ async def market_sell(
         return
 
     # Create listing
-    expires_at = datetime.utcnow() + timedelta(days=DEFAULT_LISTING_DAYS)
+    expires_at = datetime.utcnow() + timedelta(days=MARKET_LISTING_DAYS)
 
     listing = MarketListing(
         seller_id=user.telegram_id,
@@ -737,8 +729,8 @@ async def market_sell(
         f"✅ <b>Listed on Market!</b>\n\n"
         f"Pokemon: <b>{pokemon.species.name}</b>{shiny} Lv.{pokemon.level}\n"
         f"IV: {pokemon.iv_percentage:.1f}%\n"
-        f"Price: {price:,} TC\n"
-        f"Expires: {DEFAULT_LISTING_DAYS} days\n\n"
+        f"Price: {price:,} {CURRENCY_SHORT}\n"
+        f"Expires: {MARKET_LISTING_DAYS} days\n\n"
         f"<i>Your Pokemon is now visible to all trainers!</i>"
     )
 
@@ -796,9 +788,9 @@ async def market_buy(
     if user.balance < listing.price:
         await message.answer(
             f"❌ Not enough Telecoins!\n\n"
-            f"Price: {listing.price:,} TC\n"
-            f"Your balance: {user.balance:,} TC\n"
-            f"Need: {listing.price - user.balance:,} TC more"
+            f"Price: {listing.price:,} {CURRENCY_SHORT}\n"
+            f"Your balance: {user.balance:,} {CURRENCY_SHORT}\n"
+            f"Need: {listing.price - user.balance:,} {CURRENCY_SHORT} more"
         )
         return
 
@@ -852,9 +844,9 @@ async def market_buy(
         f"🎉 <b>Purchase Complete!</b>\n\n"
         f"You bought <b>{pokemon.species.name}</b>{shiny} Lv.{pokemon.level}\n"
         f"IV: {pokemon.iv_percentage:.1f}%\n"
-        f"Price: {listing.price:,} TC\n\n"
+        f"Price: {listing.price:,} {CURRENCY_SHORT}\n\n"
         f"Seller: {seller.display_name}\n"
-        f"Your new balance: {user.balance:,} TC\n\n"
+        f"Your new balance: {user.balance:,} {CURRENCY_SHORT}\n\n"
         f"<i>Use /pokemon to see your new Pokemon!</i>"
     )
 
@@ -977,7 +969,7 @@ async def market_my_listings(
 
         lines.append(
             f"\n<b>#{i}</b> {pokemon.species.name}{shiny} Lv.{pokemon.level}\n"
-            f"   IV: {pokemon.iv_percentage:.1f}% | Price: {listing.price:,} TC\n"
+            f"   IV: {pokemon.iv_percentage:.1f}% | Price: {listing.price:,} {CURRENCY_SHORT}\n"
             f"   Views: {listing.view_count} | {time_str}"
         )
 
@@ -1094,7 +1086,7 @@ async def market_info(
         f"Gender: {pokemon.gender or 'Unknown'}\n\n"
         f"<b>IVs ({pokemon.iv_percentage:.1f}%)</b>\n"
         f"{iv_line}\n\n"
-        f"<b>Price:</b> {listing.price:,} TC\n"
+        f"<b>Price:</b> {listing.price:,} {CURRENCY_SHORT}\n"
         f"<b>Seller:</b> {seller.display_name if seller else 'Unknown'}\n"
         f"<b>Views:</b> {listing.view_count}\n"
         f"<b>Expires in:</b> {time_str}\n\n"

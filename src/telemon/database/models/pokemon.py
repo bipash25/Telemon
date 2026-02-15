@@ -7,6 +7,7 @@ from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from telemon.core.constants import MAX_IV_TOTAL
 from telemon.database.models.base import Base
 
 
@@ -127,7 +128,7 @@ class Pokemon(Base):
     @property
     def iv_percentage(self) -> float:
         """Get IV percentage (out of perfect 186)."""
-        return round((self.iv_total / 186) * 100, 2)
+        return round((self.iv_total / MAX_IV_TOTAL) * 100, 2)
 
     @property
     def ev_total(self) -> int:
@@ -144,7 +145,7 @@ class Pokemon(Base):
     @property
     def is_perfect_iv(self) -> bool:
         """Check if Pokemon has perfect IVs (all 31)."""
-        return self.iv_total == 186
+        return self.iv_total == MAX_IV_TOTAL
 
     @property
     def is_tradeable(self) -> bool:

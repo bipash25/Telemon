@@ -7,6 +7,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from telemon.config import CURRENCY_SHORT
+from telemon.core.constants import MAX_FRIENDSHIP
 from telemon.core.evolution import check_evolution, evolve_pokemon, get_possible_evolutions
 from telemon.database.models import Pokemon, PokemonSpecies, User
 from telemon.logging import get_logger
@@ -334,7 +336,7 @@ HP: {poke.iv_hp} | Atk: {poke.iv_attack} | Def: {poke.iv_defense}
 SpA: {poke.iv_sp_attack} | SpD: {poke.iv_sp_defense} | Spe: {poke.iv_speed}
 
 <b>Held Item:</b> {poke.held_item or 'None'}
-<b>Friendship:</b> {poke.friendship}/255
+<b>Friendship:</b> {poke.friendship}/{MAX_FRIENDSHIP}
 
 <i>Caught {poke.caught_at.strftime('%Y-%m-%d')}</i>"""
 
@@ -695,7 +697,7 @@ async def cmd_evolve(message: Message, session: AsyncSession, user: User) -> Non
             if completed:
                 await session.commit()
                 for q in completed:
-                    quest_text += f"\n📋 Quest complete: {q.description} (+{q.reward_coins:,} TC)"
+                    quest_text += f"\n📋 Quest complete: {q.description} (+{q.reward_coins:,} {CURRENCY_SHORT})"
             
             # Achievement hooks
             user.total_evolutions += 1

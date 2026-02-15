@@ -1,4 +1,4 @@
-"""Centralized item catalog for all items in Telemon.
+"""Centralized item catalog for all items in PokeVault.
 
 All item definitions live here. Both the seed script and runtime code
 import from this module so there is a single source of truth.
