@@ -1,5 +1,6 @@
 """Admin and group settings handlers."""
 
+import random
 from datetime import datetime
 
 from aiogram import Bot, Router
@@ -10,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from telemon.core.spawning import create_spawn, get_random_species
 from telemon.database.models import ActiveSpawn, Group, PokemonSpecies, SpawnAdmin
+from telemon.database.models.spawn_admin import SPAWN_PERMISSIONS
 from telemon.logging import get_logger
 
 router = Router(name="admin")
@@ -18,242 +20,272 @@ logger = get_logger(__name__)
 # Bot owner user ID - can always use spawn commands
 BOT_OWNER_ID = 6894738352
 
+# Valid Pokemon types for type: filter
+VALID_TYPES = {
+    "normal", "fire", "water", "grass", "electric", "ice",
+    "fighting", "poison", "ground", "flying", "psychic", "bug",
+    "rock", "ghost", "dragon", "dark", "steel", "fairy",
+}
 
-async def is_spawn_admin(session: AsyncSession, user_id: int) -> bool:
-    """Check if user is allowed to use /spawn command."""
-    # Bot owner always has access
-    if user_id == BOT_OWNER_ID:
-        return True
+# Rarity keywords
+RARITY_KEYWORDS = {"legendary", "mythical", "rare", "ultra_rare", "uncommon", "common"}
 
-    # Check spawn_admins table
+
+# ------------------------------------------------------------------ #
+# Permission helpers
+# ------------------------------------------------------------------ #
+
+async def get_spawn_admin(session: AsyncSession, user_id: int) -> SpawnAdmin | None:
+    """Get SpawnAdmin record for a user (None if not a spawner)."""
     result = await session.execute(
         select(SpawnAdmin).where(SpawnAdmin.user_id == user_id)
     )
-    return result.scalar_one_or_none() is not None
+    return result.scalar_one_or_none()
 
 
-@router.message(Command("addspawner"))
-async def cmd_add_spawner(message: Message, session: AsyncSession) -> None:
-    """Add a user to spawn admins list. Bot owner only."""
-    if not message.from_user:
-        return
+def _is_owner(user_id: int) -> bool:
+    return user_id == BOT_OWNER_ID
 
-    # Only bot owner can add spawners
-    if message.from_user.id != BOT_OWNER_ID:
-        await message.answer("Only the bot owner can use this command!")
-        return
 
-    # Get target user from reply or mention
-    target_user_id = None
-    target_username = None
+async def is_spawn_admin(session: AsyncSession, user_id: int) -> bool:
+    """Check if user is allowed to use /spawn command."""
+    if _is_owner(user_id):
+        return True
+    return await get_spawn_admin(session, user_id) is not None
 
-    if message.reply_to_message and message.reply_to_message.from_user:
-        target_user_id = message.reply_to_message.from_user.id
-        target_username = message.reply_to_message.from_user.username or str(target_user_id)
-    elif message.entities:
-        # Check for mentions
-        for entity in message.entities:
-            if entity.type == "mention":
-                # Extract username from text
-                mention_text = message.text[entity.offset : entity.offset + entity.length]
-                target_username = mention_text.lstrip("@")
-                await message.answer(
-                    f"Cannot add @{target_username} - please reply to a message from the user you want to add."
-                )
-                return
-            elif entity.type == "text_mention" and entity.user:
-                target_user_id = entity.user.id
-                target_username = entity.user.username or str(target_user_id)
 
-    if not target_user_id:
-        await message.answer(
-            "<b>Usage:</b> Reply to a message from the user you want to add as a spawn admin.\n\n"
-            "Example: Reply to someone's message and type /addspawner"
+def _check_perm(user_id: int, admin: SpawnAdmin | None, perm: str) -> bool:
+    """Check if a user has a specific spawn permission."""
+    if _is_owner(user_id):
+        return True  # Owner has all permissions
+    if admin is None:
+        return False
+    return admin.has_perm(perm)
+
+
+# ------------------------------------------------------------------ #
+# Spawn argument parser
+# ------------------------------------------------------------------ #
+
+def _parse_spawn_args(text: str) -> dict:
+    """Parse /spawn arguments into a structured dict.
+
+    Returns:
+        {
+            "name": str | None,        # Pokemon name
+            "gen": int | None,         # generation filter
+            "type": str | None,        # type filter
+            "rarity": str | None,      # legendary/mythical/rare/ultra_rare/uncommon/common
+            "shiny": bool,             # force shiny
+            "perms_needed": set[str],  # permissions required
+        }
+    """
+    result: dict = {
+        "name": None,
+        "gen": None,
+        "type": None,
+        "rarity": None,
+        "shiny": False,
+        "perms_needed": set(),
+    }
+
+    # Strip /spawn prefix
+    raw = text.strip()
+    if raw.startswith("/spawn"):
+        raw = raw[6:].strip()
+    # Also strip @bot suffix from command
+    if raw.startswith("@"):
+        at_end = raw.find(" ")
+        raw = raw[at_end:].strip() if at_end != -1 else ""
+
+    if not raw:
+        return result  # Plain /spawn — random, no perms needed
+
+    tokens = raw.split()
+    name_parts: list[str] = []
+
+    for token in tokens:
+        lower = token.lower().rstrip(",")
+
+        # --shiny flag
+        if lower in ("--shiny", "-s"):
+            result["shiny"] = True
+            result["perms_needed"].add("shiny")
+            continue
+
+        # gen:N filter
+        if lower.startswith("gen:"):
+            try:
+                gen = int(lower.split(":", 1)[1])
+                if 1 <= gen <= 9:
+                    result["gen"] = gen
+                    result["perms_needed"].add("gen")
+            except ValueError:
+                pass
+            continue
+
+        # type:X filter
+        if lower.startswith("type:"):
+            ptype = lower.split(":", 1)[1]
+            if ptype in VALID_TYPES:
+                result["type"] = ptype
+                result["perms_needed"].add("type")
+            continue
+
+        # Rarity keywords
+        if lower in RARITY_KEYWORDS:
+            result["rarity"] = lower
+            result["perms_needed"].add("rarity")
+            continue
+
+        # Everything else is part of the Pokemon name
+        name_parts.append(token)
+
+    if name_parts:
+        result["name"] = " ".join(name_parts)
+        result["perms_needed"].add("name")
+
+    return result
+
+
+# ------------------------------------------------------------------ #
+# Species resolver
+# ------------------------------------------------------------------ #
+
+async def _resolve_species(
+    session: AsyncSession, args: dict
+) -> tuple[PokemonSpecies | None, str | None]:
+    """Resolve a PokemonSpecies based on parsed spawn args.
+
+    Returns (species, error_message).
+    """
+    query = select(PokemonSpecies)
+
+    # By name — exact match
+    if args["name"]:
+        name_lower = args["name"].lower().replace(" ", "-")
+        result = await session.execute(
+            query.where(PokemonSpecies.name_lower == name_lower)
         )
-        return
+        species = result.scalar_one_or_none()
+        if not species:
+            # Try partial match
+            result = await session.execute(
+                query.where(PokemonSpecies.name_lower.ilike(f"%{name_lower}%"))
+            )
+            matches = result.scalars().all()
+            if len(matches) == 1:
+                species = matches[0]
+            elif len(matches) > 1:
+                names = ", ".join(m.name for m in matches[:10])
+                return None, f"Multiple matches: {names}. Be more specific."
+            else:
+                # Try dex number
+                try:
+                    dex = int(args["name"])
+                    result = await session.execute(
+                        query.where(PokemonSpecies.national_dex == dex)
+                    )
+                    species = result.scalar_one_or_none()
+                except ValueError:
+                    pass
+                if not species:
+                    return None, f"Pokemon '{args['name']}' not found."
+        return species, None
 
-    # Check if already a spawn admin
-    result = await session.execute(
-        select(SpawnAdmin).where(SpawnAdmin.user_id == target_user_id)
-    )
-    existing = result.scalar_one_or_none()
+    # Build filter query for random selection
+    filters = []
 
-    if existing:
-        await message.answer(f"User {target_username} is already a spawn admin!")
-        return
+    if args["gen"]:
+        filters.append(PokemonSpecies.generation == args["gen"])
 
-    # Add to spawn_admins
-    spawn_admin = SpawnAdmin(
-        user_id=target_user_id,
-        added_by=message.from_user.id,
-    )
-    session.add(spawn_admin)
-    await session.commit()
-
-    await message.answer(f"Added {target_username} as a spawn admin!")
-    logger.info(
-        "Added spawn admin",
-        user_id=target_user_id,
-        added_by=message.from_user.id,
-    )
-
-
-@router.message(Command("removespawner"))
-async def cmd_remove_spawner(message: Message, session: AsyncSession) -> None:
-    """Remove a user from spawn admins list. Bot owner only."""
-    if not message.from_user:
-        return
-
-    # Only bot owner can remove spawners
-    if message.from_user.id != BOT_OWNER_ID:
-        await message.answer("Only the bot owner can use this command!")
-        return
-
-    # Get target user from reply or mention
-    target_user_id = None
-    target_username = None
-
-    if message.reply_to_message and message.reply_to_message.from_user:
-        target_user_id = message.reply_to_message.from_user.id
-        target_username = message.reply_to_message.from_user.username or str(target_user_id)
-    elif message.entities:
-        for entity in message.entities:
-            if entity.type == "text_mention" and entity.user:
-                target_user_id = entity.user.id
-                target_username = entity.user.username or str(target_user_id)
-
-    if not target_user_id:
-        await message.answer(
-            "<b>Usage:</b> Reply to a message from the user you want to remove as a spawn admin.\n\n"
-            "Example: Reply to someone's message and type /removespawner"
+    if args["type"]:
+        ptype = args["type"]
+        filters.append(
+            (PokemonSpecies.type1 == ptype) | (PokemonSpecies.type2 == ptype)
         )
-        return
 
-    # Check if is a spawn admin
-    result = await session.execute(
-        select(SpawnAdmin).where(SpawnAdmin.user_id == target_user_id)
-    )
-    existing = result.scalar_one_or_none()
+    if args["rarity"]:
+        rarity = args["rarity"]
+        if rarity == "legendary":
+            filters.append(PokemonSpecies.is_legendary == True)
+            filters.append(PokemonSpecies.is_mythical == False)
+        elif rarity == "mythical":
+            filters.append(PokemonSpecies.is_mythical == True)
+        elif rarity == "ultra_rare":
+            filters.append(PokemonSpecies.catch_rate <= 3)
+            filters.append(PokemonSpecies.is_legendary == False)
+            filters.append(PokemonSpecies.is_mythical == False)
+        elif rarity == "rare":
+            filters.append(PokemonSpecies.catch_rate > 3)
+            filters.append(PokemonSpecies.catch_rate <= 45)
+            filters.append(PokemonSpecies.is_legendary == False)
+        elif rarity == "uncommon":
+            filters.append(PokemonSpecies.catch_rate > 45)
+            filters.append(PokemonSpecies.catch_rate <= 120)
+        elif rarity == "common":
+            filters.append(PokemonSpecies.catch_rate > 120)
 
-    if not existing:
-        await message.answer(f"User {target_username} is not a spawn admin!")
-        return
+    if filters:
+        for f in filters:
+            query = query.where(f)
+        result = await session.execute(query)
+        candidates = result.scalars().all()
+        if not candidates:
+            return None, "No Pokemon match those filters."
+        return random.choice(candidates), None
 
-    # Remove from spawn_admins
-    await session.execute(
-        delete(SpawnAdmin).where(SpawnAdmin.user_id == target_user_id)
-    )
-    await session.commit()
-
-    await message.answer(f"Removed {target_username} from spawn admins!")
-    logger.info(
-        "Removed spawn admin",
-        user_id=target_user_id,
-        removed_by=message.from_user.id,
-    )
-
-
-@router.message(Command("spawners"))
-async def cmd_list_spawners(message: Message, session: AsyncSession) -> None:
-    """List all spawn admins. Bot owner only."""
-    if not message.from_user:
-        return
-
-    # Only bot owner can list spawners
-    if message.from_user.id != BOT_OWNER_ID:
-        await message.answer("Only the bot owner can use this command!")
-        return
-
-    # Get all spawn admins
-    result = await session.execute(select(SpawnAdmin))
-    spawn_admins = result.scalars().all()
-
-    if not spawn_admins:
-        await message.answer(
-            "<b>Spawn Admins</b>\n\n"
-            "No spawn admins added yet.\n\n"
-            "Use /addspawner by replying to a user's message to add them."
-        )
-        return
-
-    # Build list
-    lines = ["<b>Spawn Admins</b>\n"]
-    for i, admin in enumerate(spawn_admins, 1):
-        added_at = admin.created_at.strftime("%Y-%m-%d") if admin.created_at else "Unknown"
-        lines.append(f"{i}. User ID: <code>{admin.user_id}</code> (added: {added_at})")
-
-    lines.append(f"\nTotal: {len(spawn_admins)} spawn admin(s)")
-    lines.append("\nNote: Bot owner always has spawn access.")
-
-    await message.answer("\n".join(lines))
+    # No filters — use weighted random
+    return await get_random_species(session), None
 
 
-@router.message(Command("settings"))
-async def cmd_settings(message: Message, session: AsyncSession) -> None:
-    """Handle /settings command for group admins."""
-    # Check if in group
-    if message.chat.type == "private":
-        await message.answer(" This command only works in groups!")
-        return
-
-    # Check if user is admin
-    chat_member = await message.chat.get_member(message.from_user.id)
-    if chat_member.status not in ("administrator", "creator"):
-        await message.answer(" Only group admins can use this command!")
-        return
-
-    # Get or create group settings
-    result = await session.execute(
-        select(Group).where(Group.chat_id == message.chat.id)
-    )
-    group = result.scalar_one_or_none()
-
-    if not group:
-        group = Group(
-            chat_id=message.chat.id,
-            title=message.chat.title,
-        )
-        session.add(group)
-        await session.commit()
-
-    settings_text = f"""
-<b>Group Settings</b>
-{message.chat.title}
-
-<b>Spawning</b>
-Enabled: {'Yes' if group.spawn_enabled else 'No'}
-Spawn Threshold: {group.spawn_threshold} messages
-Spawn Channel: {'Set' if group.spawn_channel_id else 'Not set'}
-
-<b>Features</b>
-Battles Enabled: {'Yes' if group.battles_enabled else 'No'}
-Language: {group.language.upper()}
-
-<b>Stats</b>
-Total Spawns: {group.total_spawns}
-Total Catches: {group.total_catches}
-
-<i>Use inline buttons below to change settings.</i>
-"""
-    # TODO: Add inline keyboard for settings
-    await message.answer(settings_text)
-
+# ------------------------------------------------------------------ #
+# /spawn command
+# ------------------------------------------------------------------ #
 
 @router.message(Command("spawn"))
 async def cmd_spawn(message: Message, session: AsyncSession, bot: Bot) -> None:
-    """Handle /spawn command to force a Pokemon spawn."""
-    # Check if in group
+    """Handle /spawn command to force a Pokemon spawn.
+
+    Syntax:
+        /spawn                        -- random (any spawner)
+        /spawn Rayquaza               -- by name (perm: name)
+        /spawn gen:3                  -- by generation (perm: gen)
+        /spawn type:fire              -- by type (perm: type)
+        /spawn legendary              -- by rarity (perm: rarity)
+        /spawn --shiny                -- force shiny (perm: shiny)
+        /spawn Rayquaza --shiny       -- combinable
+        /spawn gen:5 type:dragon --shiny
+    """
     if message.chat.type == "private":
         await message.answer("This command only works in groups!")
         return
+    if not message.from_user:
+        return
 
-    # Check if user is spawn admin (bot owner or in spawn_admins table)
-    if message.from_user:
-        has_permission = await is_spawn_admin(session, message.from_user.id)
-        if not has_permission:
-            await message.answer("You don't have permission to use /spawn!")
-            return
-    else:
+    user_id = message.from_user.id
+
+    # Check basic spawn admin access
+    has_access = await is_spawn_admin(session, user_id)
+    if not has_access:
+        await message.answer("You don't have permission to use /spawn!")
+        return
+
+    # Parse arguments
+    args = _parse_spawn_args(message.text or "")
+
+    # Check granular permissions
+    admin = await get_spawn_admin(session, user_id)
+    missing_perms: list[str] = []
+    for perm in args["perms_needed"]:
+        if not _check_perm(user_id, admin, perm):
+            missing_perms.append(perm)
+
+    if missing_perms:
+        await message.answer(
+            f"You don't have permission for: <b>{', '.join(missing_perms)}</b>\n"
+            f"Ask the bot owner to grant them via /grant."
+        )
         return
 
     chat_id = message.chat.id
@@ -287,25 +319,29 @@ async def cmd_spawn(message: Message, session: AsyncSession, bot: Bot) -> None:
         )
         return
 
-    # Get random species
-    species = await get_random_species(session)
+    # Resolve species based on args
+    species, error = await _resolve_species(session, args)
+    if error:
+        await message.answer(f"x {error}")
+        return
     if not species:
         await message.answer("No Pokemon species found in database!")
         return
 
-    # Create spawn (without message_id for now)
+    # Create spawn
     spawn = await create_spawn(
         session=session,
         chat_id=chat_id,
-        message_id=0,  # Will update after sending
+        message_id=0,
         species=species,
+        force_shiny=args["shiny"],
     )
 
     if not spawn:
         await message.answer("Failed to create spawn!")
         return
 
-    # Use shared spawn message sender
+    # Send spawn message
     from telemon.bot.handlers.spawn import send_spawn_message
 
     try:
@@ -314,15 +350,374 @@ async def cmd_spawn(message: Message, session: AsyncSession, bot: Bot) -> None:
             spawn.message_id = msg_id
             await session.commit()
 
+            # Build log details
+            details: list[str] = [species.name]
+            if args["gen"]:
+                details.append(f"gen:{args['gen']}")
+            if args["type"]:
+                details.append(f"type:{args['type']}")
+            if args["rarity"]:
+                details.append(args["rarity"])
+            if args["shiny"]:
+                details.append("shiny")
+
             logger.info(
-                "Spawn admin force spawned Pokemon",
+                "Admin force spawned Pokemon",
                 chat_id=chat_id,
                 species=species.name,
                 is_shiny=spawn.is_shiny,
-                admin_id=message.from_user.id if message.from_user else None,
+                admin_id=user_id,
+                filters=" ".join(details),
             )
         else:
             await message.answer("Failed to send spawn message!")
     except Exception as e:
         logger.error("Failed to send spawn message", error=str(e), chat_id=chat_id)
         await message.answer(f"Failed to send spawn message: {e}")
+
+
+# ------------------------------------------------------------------ #
+# /addspawner  /removespawner
+# ------------------------------------------------------------------ #
+
+@router.message(Command("addspawner"))
+async def cmd_add_spawner(message: Message, session: AsyncSession) -> None:
+    """Add a user to spawn admins list. Bot owner only."""
+    if not message.from_user:
+        return
+    if message.from_user.id != BOT_OWNER_ID:
+        await message.answer("Only the bot owner can use this command!")
+        return
+
+    target_user_id, target_username = _extract_target(message)
+
+    if not target_user_id:
+        await message.answer(
+            "<b>Usage:</b> Reply to a message from the user you want to add.\n\n"
+            "Example: Reply to someone's message and type /addspawner"
+        )
+        return
+
+    # Check if already exists
+    existing = await get_spawn_admin(session, target_user_id)
+    if existing:
+        await message.answer(f"User {target_username} is already a spawn admin!")
+        return
+
+    spawn_admin = SpawnAdmin(
+        user_id=target_user_id,
+        added_by=message.from_user.id,
+        permissions=[],  # Default: random only
+    )
+    session.add(spawn_admin)
+    await session.commit()
+
+    await message.answer(
+        f"Added <b>{target_username}</b> as a spawn admin!\n"
+        f"Permissions: <b>random only</b>\n\n"
+        f"Use <code>/grant {target_user_id} [perm]</code> to add permissions.\n"
+        f"Available: name, gen, type, rarity, shiny, all"
+    )
+    logger.info("Added spawn admin", user_id=target_user_id, added_by=message.from_user.id)
+
+
+@router.message(Command("removespawner"))
+async def cmd_remove_spawner(message: Message, session: AsyncSession) -> None:
+    """Remove a user from spawn admins list. Bot owner only."""
+    if not message.from_user:
+        return
+    if message.from_user.id != BOT_OWNER_ID:
+        await message.answer("Only the bot owner can use this command!")
+        return
+
+    target_user_id, target_username = _extract_target(message)
+
+    if not target_user_id:
+        await message.answer(
+            "<b>Usage:</b> Reply to a message from the user you want to remove.\n\n"
+            "Example: Reply to someone's message and type /removespawner"
+        )
+        return
+
+    existing = await get_spawn_admin(session, target_user_id)
+    if not existing:
+        await message.answer(f"User {target_username} is not a spawn admin!")
+        return
+
+    await session.execute(
+        delete(SpawnAdmin).where(SpawnAdmin.user_id == target_user_id)
+    )
+    await session.commit()
+
+    await message.answer(f"Removed {target_username} from spawn admins!")
+    logger.info("Removed spawn admin", user_id=target_user_id, removed_by=message.from_user.id)
+
+
+# ------------------------------------------------------------------ #
+# /grant  /revoke  — manage spawner permissions
+# ------------------------------------------------------------------ #
+
+@router.message(Command("grant"))
+async def cmd_grant(message: Message, session: AsyncSession) -> None:
+    """Grant spawn permissions to a spawner. Bot owner only.
+
+    Usage:
+        /grant <user_id> <perm1> [perm2] ...
+        /grant (reply) <perm1> [perm2] ...
+    """
+    if not message.from_user or message.from_user.id != BOT_OWNER_ID:
+        await message.answer("Only the bot owner can use this command!")
+        return
+
+    parts = (message.text or "").split()
+    # Remove /grant
+    parts = parts[1:] if parts else []
+
+    # Determine target and perms
+    target_user_id = None
+    perm_tokens: list[str] = []
+
+    if message.reply_to_message and message.reply_to_message.from_user:
+        target_user_id = message.reply_to_message.from_user.id
+        perm_tokens = parts  # All args are perms
+    elif parts:
+        # First arg might be user_id
+        try:
+            target_user_id = int(parts[0])
+            perm_tokens = parts[1:]
+        except ValueError:
+            await message.answer(
+                "<b>Usage:</b>\n"
+                "<code>/grant [user_id] [perm1] [perm2] ...</code>\n"
+                "Or reply to the user's message.\n\n"
+                f"<b>Available perms:</b> {', '.join(sorted(SPAWN_PERMISSIONS))}"
+            )
+            return
+
+    if not target_user_id or not perm_tokens:
+        await message.answer(
+            "<b>Usage:</b>\n"
+            "<code>/grant [user_id] [perm1] [perm2] ...</code>\n"
+            "Or reply to the user's message.\n\n"
+            f"<b>Available perms:</b> {', '.join(sorted(SPAWN_PERMISSIONS))}"
+        )
+        return
+
+    # Validate perms
+    requested = {p.lower() for p in perm_tokens}
+    invalid = requested - SPAWN_PERMISSIONS
+    if invalid:
+        await message.answer(
+            f"Invalid permissions: {', '.join(invalid)}\n"
+            f"Available: {', '.join(sorted(SPAWN_PERMISSIONS))}"
+        )
+        return
+
+    admin = await get_spawn_admin(session, target_user_id)
+    if not admin:
+        await message.answer(
+            f"User <code>{target_user_id}</code> is not a spawn admin.\n"
+            "Add them first with /addspawner."
+        )
+        return
+
+    # Merge permissions
+    current = set(admin.permissions or [])
+    current |= requested
+    admin.permissions = sorted(current)
+    await session.commit()
+
+    await message.answer(
+        f"Granted <b>{', '.join(sorted(requested))}</b> to user <code>{target_user_id}</code>.\n"
+        f"Current perms: <b>{admin.perm_display()}</b>"
+    )
+    logger.info("Granted spawn perms", user_id=target_user_id, granted=sorted(requested))
+
+
+@router.message(Command("revoke"))
+async def cmd_revoke(message: Message, session: AsyncSession) -> None:
+    """Revoke spawn permissions from a spawner. Bot owner only.
+
+    Usage:
+        /revoke <user_id> <perm1> [perm2] ...
+        /revoke (reply) <perm1> [perm2] ...
+    """
+    if not message.from_user or message.from_user.id != BOT_OWNER_ID:
+        await message.answer("Only the bot owner can use this command!")
+        return
+
+    parts = (message.text or "").split()
+    parts = parts[1:] if parts else []
+
+    target_user_id = None
+    perm_tokens: list[str] = []
+
+    if message.reply_to_message and message.reply_to_message.from_user:
+        target_user_id = message.reply_to_message.from_user.id
+        perm_tokens = parts
+    elif parts:
+        try:
+            target_user_id = int(parts[0])
+            perm_tokens = parts[1:]
+        except ValueError:
+            await message.answer(
+                "<b>Usage:</b>\n"
+                "<code>/revoke [user_id] [perm1] [perm2] ...</code>\n"
+                "Or reply to the user's message."
+            )
+            return
+
+    if not target_user_id or not perm_tokens:
+        await message.answer(
+            "<b>Usage:</b>\n"
+            "<code>/revoke [user_id] [perm1] [perm2] ...</code>\n"
+            "Or reply to the user's message."
+        )
+        return
+
+    requested = {p.lower() for p in perm_tokens}
+
+    admin = await get_spawn_admin(session, target_user_id)
+    if not admin:
+        await message.answer(f"User <code>{target_user_id}</code> is not a spawn admin.")
+        return
+
+    current = set(admin.permissions or [])
+    removed = current & requested
+    current -= requested
+    admin.permissions = sorted(current) if current else []
+    await session.commit()
+
+    if removed:
+        await message.answer(
+            f"Revoked <b>{', '.join(sorted(removed))}</b> from user <code>{target_user_id}</code>.\n"
+            f"Current perms: <b>{admin.perm_display()}</b>"
+        )
+    else:
+        await message.answer(
+            f"User <code>{target_user_id}</code> didn't have those permissions."
+        )
+    logger.info("Revoked spawn perms", user_id=target_user_id, revoked=sorted(removed))
+
+
+# ------------------------------------------------------------------ #
+# /spawners  — list all spawn admins with permissions
+# ------------------------------------------------------------------ #
+
+@router.message(Command("spawners"))
+async def cmd_list_spawners(message: Message, session: AsyncSession) -> None:
+    """List all spawn admins with their permissions. Bot owner only."""
+    if not message.from_user:
+        return
+    if message.from_user.id != BOT_OWNER_ID:
+        await message.answer("Only the bot owner can use this command!")
+        return
+
+    result = await session.execute(select(SpawnAdmin))
+    spawn_admins = result.scalars().all()
+
+    if not spawn_admins:
+        await message.answer(
+            "<b>Spawn Admins</b>\n\n"
+            "No spawn admins added yet.\n\n"
+            "Use /addspawner by replying to a user's message to add them."
+        )
+        return
+
+    lines = ["<b>Spawn Admins</b>\n"]
+    for i, admin in enumerate(spawn_admins, 1):
+        added_at = admin.created_at.strftime("%Y-%m-%d") if admin.created_at else "?"
+        perms = admin.perm_display()
+        lines.append(
+            f"{i}. <code>{admin.user_id}</code> -- <b>{perms}</b> (added: {added_at})"
+        )
+
+    lines.append(f"\nTotal: {len(spawn_admins)} spawn admin(s)")
+    lines.append("Note: Bot owner always has full access.")
+    lines.append(
+        "\n<b>Manage:</b>\n"
+        "<code>/grant [user_id] [perm]</code>\n"
+        "<code>/revoke [user_id] [perm]</code>\n"
+        f"Perms: {', '.join(sorted(SPAWN_PERMISSIONS))}"
+    )
+
+    await message.answer("\n".join(lines))
+
+
+# ------------------------------------------------------------------ #
+# /settings  — group admin command
+# ------------------------------------------------------------------ #
+
+@router.message(Command("settings"))
+async def cmd_settings(message: Message, session: AsyncSession) -> None:
+    """Handle /settings command for group admins."""
+    if message.chat.type == "private":
+        await message.answer("This command only works in groups!")
+        return
+
+    chat_member = await message.chat.get_member(message.from_user.id)
+    if chat_member.status not in ("administrator", "creator"):
+        await message.answer("Only group admins can use this command!")
+        return
+
+    result = await session.execute(
+        select(Group).where(Group.chat_id == message.chat.id)
+    )
+    group = result.scalar_one_or_none()
+
+    if not group:
+        group = Group(
+            chat_id=message.chat.id,
+            title=message.chat.title,
+        )
+        session.add(group)
+        await session.commit()
+
+    settings_text = f"""
+<b>Group Settings</b>
+{message.chat.title}
+
+<b>Spawning</b>
+Enabled: {'Yes' if group.spawn_enabled else 'No'}
+Spawn Threshold: {group.spawn_threshold} messages
+Spawn Channel: {'Set' if group.spawn_channel_id else 'Not set'}
+
+<b>Features</b>
+Battles Enabled: {'Yes' if group.battles_enabled else 'No'}
+Language: {group.language.upper()}
+
+<b>Stats</b>
+Total Spawns: {group.total_spawns}
+Total Catches: {group.total_catches}
+
+<i>Use inline buttons below to change settings.</i>
+"""
+    await message.answer(settings_text)
+
+
+# ------------------------------------------------------------------ #
+# Helpers
+# ------------------------------------------------------------------ #
+
+def _extract_target(message: Message) -> tuple[int | None, str]:
+    """Extract target user_id and display name from reply or text_mention."""
+    target_user_id = None
+    target_username = "Unknown"
+
+    if message.reply_to_message and message.reply_to_message.from_user:
+        target_user_id = message.reply_to_message.from_user.id
+        target_username = (
+            message.reply_to_message.from_user.username
+            or message.reply_to_message.from_user.full_name
+            or str(target_user_id)
+        )
+    elif message.entities:
+        for entity in message.entities:
+            if entity.type == "mention":
+                mention_text = (message.text or "")[entity.offset : entity.offset + entity.length]
+                return None, mention_text.lstrip("@")
+            elif entity.type == "text_mention" and entity.user:
+                target_user_id = entity.user.id
+                target_username = entity.user.username or str(target_user_id)
+
+    return target_user_id, target_username

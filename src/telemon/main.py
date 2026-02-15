@@ -13,9 +13,12 @@ logger = get_logger(__name__)
 async def timed_spawn_loop(bot) -> None:
     """Background task: periodically spawn Pokemon in active groups.
 
-    Every 10 minutes, check groups that haven't had a spawn in 4-6 hours
-    and have spawn_enabled. Force a spawn if there's no active spawn.
+    Each spawn-enabled group gets a random no-activity spawn interval
+    between 10-20 minutes.  The loop checks every 60 seconds and fires
+    a timed spawn if the group's interval has elapsed since its last spawn
+    and there is no active (uncaught) spawn.
     """
+    import random
     from datetime import datetime, timedelta
     from sqlalchemy import select
     from telemon.database import async_session_factory
@@ -24,23 +27,35 @@ async def timed_spawn_loop(bot) -> None:
 
     await asyncio.sleep(60)  # Wait 1 minute after startup
 
+    # Per-group random interval (minutes) — re-rolled after each timed spawn
+    _group_intervals: dict[int, float] = {}
+
+    def _get_interval(chat_id: int) -> float:
+        if chat_id not in _group_intervals:
+            _group_intervals[chat_id] = random.uniform(10, 20)
+        return _group_intervals[chat_id]
+
+    def _reroll_interval(chat_id: int) -> None:
+        _group_intervals[chat_id] = random.uniform(10, 20)
+
     while True:
         try:
             async with async_session_factory() as session:
-                # Find groups that are active, spawn-enabled, and haven't
-                # had a spawn in 4+ hours
-                cutoff = datetime.utcnow() - timedelta(hours=4)
                 result = await session.execute(
-                    select(Group)
-                    .where(Group.spawn_enabled == True)
-                    .where(
-                        (Group.last_spawn_at < cutoff) |
-                        (Group.last_spawn_at.is_(None))
-                    )
+                    select(Group).where(Group.spawn_enabled == True)
                 )
                 groups = result.scalars().all()
 
+                now = datetime.utcnow()
+
                 for group in groups:
+                    interval_mins = _get_interval(group.chat_id)
+                    cutoff = now - timedelta(minutes=interval_mins)
+
+                    # Skip groups that spawned recently
+                    if group.last_spawn_at and group.last_spawn_at > cutoff:
+                        continue
+
                     # Skip if there's already an active spawn
                     active = await get_active_spawn(session, group.chat_id)
                     if active:
@@ -71,13 +86,16 @@ async def timed_spawn_loop(bot) -> None:
                                 "Timed spawn triggered",
                                 chat_id=group.chat_id,
                                 species=species.name,
+                                interval_min=round(interval_mins, 1),
                             )
+                        # Re-roll interval for next time
+                        _reroll_interval(group.chat_id)
 
         except Exception as e:
             logger.error("Error in timed spawn loop", error=str(e))
 
-        # Check every 10 minutes
-        await asyncio.sleep(600)
+        # Check every 60 seconds
+        await asyncio.sleep(60)
 
 
 async def main() -> None:
