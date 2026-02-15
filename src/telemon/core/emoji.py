@@ -40,14 +40,13 @@ def reload_emoji_map() -> int:
 def poke_emoji(dex_number: int, fallback: str = "") -> str:
     """Get an inline custom emoji tag for a Pokemon species.
 
-    Returns HTML like:  <tg-emoji emoji-id="12345">🔴</tg-emoji>
-    If no emoji is mapped, returns the fallback string.
+    NOTE: Custom emoji (<tg-emoji>) requires a premium/verified bot with a
+    purchased username via Fragment.  Regular bots cannot use these tags —
+    Telegram simply strips them and only the fallback text renders.  Until we
+    have a verified bot, this function returns empty string unconditionally.
+    The emoji map data is kept for future use.
     """
-    _load_map()
-    emoji_id = _EMOJI_MAP.get(str(dex_number))
-    if not emoji_id:
-        return fallback
-    return f'<tg-emoji emoji-id="{emoji_id}">\U0001f534</tg-emoji>'
+    return ""
 
 
 def has_emoji(dex_number: int) -> bool:

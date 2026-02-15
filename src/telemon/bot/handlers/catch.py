@@ -394,18 +394,11 @@ async def cmd_catch(message: Message, session: AsyncSession, user: User) -> None
 
     msg_lines = [
         f"<b>Congratulations {user.display_name}!</b>\n",
+        f"You caught a{shiny_text} <b>{spawn.species.name}</b>!\n",
+        f"Level: {new_pokemon.level}",
+        f"IVs: {iv_percent}% ({iv_rating})",
+        f"Nature: {nature.capitalize()}",
     ]
-
-    # Inline sprite emoji (graceful fallback if not uploaded yet)
-    try:
-        from telemon.core.emoji import poke_emoji
-        sprite = poke_emoji(spawn.species.national_dex)
-    except Exception:
-        sprite = ""
-
-    msg_lines.append(
-        f"You caught a{shiny_text} {sprite}<b>{spawn.species.name}</b>!\n"
-    )
 
     if gender:
         msg_lines.append(f"Gender: {'♀' if gender == 'female' else '♂'}")

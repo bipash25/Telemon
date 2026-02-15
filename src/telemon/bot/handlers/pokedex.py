@@ -562,7 +562,7 @@ async def _build_evolution_chain_text(
         return "<b>Evolution:</b> Does not evolve"
 
     try:
-        evo_path = Path(__file__).parent.parent.parent.parent / "data" / "evolutions.json"
+        evo_path = Path(__file__).parent.parent.parent.parent.parent / "data" / "evolutions.json"
         with open(evo_path) as f:
             all_chains = json.load(f)
 
@@ -756,16 +756,9 @@ async def pokedex_search(
     if species.flavor_text:
         flavor = f"\n<i>{species.flavor_text}</i>\n"
 
-    # Inline sprite emoji
-    try:
-        from telemon.core.emoji import poke_emoji
-        sprite = poke_emoji(species.national_dex)
-    except Exception:
-        sprite = ""
-
     caption = (
         f"📕 <b>Pokédex Entry #{species.national_dex:03d}</b>\n\n"
-        f"{sprite}<b>{species.name}</b>\n"
+        f"<b>{species.name}</b>\n"
         f"Type: {types}  |  {gen_text}\n"
         f"Rarity: {rarity}\n"
         f"{hw_line}\n"
